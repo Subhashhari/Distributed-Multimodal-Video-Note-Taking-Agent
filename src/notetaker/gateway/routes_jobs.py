@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..common import repo
@@ -22,6 +23,9 @@ from .views import results_view, status_view
 
 log = get_logger(__name__)
 router = APIRouter()
+
+JOBS_SUBMITTED = Counter("notes_jobs_submitted_total", "Jobs accepted by the gateway")
+JOBS_REJECTED = Counter("notes_jobs_rejected_total", "Submissions rejected by validation", ["code"])
 
 
 class CreateJobRequest(BaseModel):
@@ -50,6 +54,14 @@ async def create_job(
     body: CreateJobRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
 ):
+    try:
+        return await _create_job(request, body, idempotency_key)
+    except ApiError as exc:
+        JOBS_REJECTED.labels(exc.code).inc()
+        raise
+
+
+async def _create_job(request: Request, body: CreateJobRequest, idempotency_key: str | None):
     st = request.app.state
     settings = st.settings
 
@@ -93,6 +105,7 @@ async def create_job(
             await repo.mark_failed(st.db, job.id, code="ENQUEUE_FAILED",
                                    message="Could not enqueue the job.", stage=None)
             raise ApiError(503, "QUEUE_UNAVAILABLE", "The job queue is unavailable. Try again shortly.") from exc
+        JOBS_SUBMITTED.inc()
         log.info("job_created", job_id=str(job.id), video_id=video_id)
 
     return JSONResponse(

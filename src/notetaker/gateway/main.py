@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
 
 from .. import __version__
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None, *, broker=None, redis=None) -> 
         expose_headers=["Location"],
     )
     install_error_handlers(app)
+    app.mount("/metrics", make_asgi_app())
     app.include_router(routes_system.router)
     app.include_router(routes_jobs.router)
     app.include_router(routes_admin.router)

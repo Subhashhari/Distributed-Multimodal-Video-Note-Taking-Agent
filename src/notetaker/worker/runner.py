@@ -10,6 +10,7 @@ Stages are idempotent, so a redelivery resumes safely.
 from __future__ import annotations
 
 import asyncio
+import time
 from enum import StrEnum
 
 from pydantic import ValidationError
@@ -24,6 +25,7 @@ from ..common.logging import get_logger
 from ..common.messaging import BrokerProtocol, Envelope
 from ..common.repo import ClaimOutcome
 from ..common.states import STAGES, next_stage
+from . import metrics
 from .context import StageContext, StageHandler
 from .retry import pick_delay
 
@@ -67,7 +69,17 @@ class StageRunner:
         if env.stage not in STAGES:
             log.error("unknown_stage_dropped", stage=env.stage)
             return Outcome.DROPPED
+        started = time.monotonic()
+        metrics.WORKER_BUSY.set(1)
+        try:
+            outcome = await self._process(env, redelivered)
+        finally:
+            metrics.WORKER_BUSY.set(0)
+        metrics.STAGE_SECONDS.labels(env.stage, outcome.value).observe(time.monotonic() - started)
+        metrics.STAGE_OUTCOMES.labels(env.stage, outcome.value).inc()
+        return outcome
 
+    async def _process(self, env: Envelope, redelivered: bool) -> Outcome:
         lg = log.bind(job_id=str(env.job_id), stage=env.stage, worker_id=self.worker_id,
                       attempt=env.attempt, rl_attempt=env.rl_attempt)
 
@@ -77,6 +89,8 @@ class StageRunner:
             lg.info("message_dropped", reason=claim.value)
             return Outcome.DROPPED
         assert job is not None
+        if redelivered and claim == ClaimOutcome.RESUMED:
+            metrics.REDELIVERIES.labels(env.stage).inc()
         lg.info("stage_started", claim=claim.value, redelivered=redelivered)
 
         ctx = StageContext(job=job, env=env, settings=self.settings, db=self.db, faults=self.faults,
@@ -88,6 +102,7 @@ class StageRunner:
             return await self._on_rate_limited(env, exc, lg)
         except FatalError as exc:
             await repo.mark_failed(self.db, env.job_id, code=exc.code, message=exc.message, stage=env.stage)
+            metrics.JOBS_TERMINAL.labels("FAILED").inc()
             lg.warning("job_failed", code=exc.code, error=exc.message)
             return Outcome.FAILED
         except asyncio.CancelledError:
@@ -98,6 +113,7 @@ class StageRunner:
         nxt = next_stage(env.stage)
         if nxt is None:
             status = await repo.complete_job(self.db, env.job_id, result or {})
+            metrics.JOBS_TERMINAL.labels(status or "UNKNOWN").inc()
             lg.info("job_completed", status=status)
             return Outcome.COMPLETED
         await self.broker.publish_stage(env.for_stage(nxt))
@@ -106,6 +122,15 @@ class StageRunner:
 
     # ------------------------------------------------------------------ failure paths
     async def _on_rate_limited(self, env: Envelope, exc: RateLimited, lg) -> Outcome:
+        if exc.self_throttled:  # queued behind other jobs: wait, don't spend the retry budget
+            delay = pick_delay(self.settings.backoff_schedule, 1, exc.retry_after)
+            await self.broker.publish_retry(env, delay)
+            await repo.schedule_retry(self.db, env.job_id, stage=env.stage, reason="RATE_LIMITED", api=exc.api,
+                                      attempt=env.attempt, rl_attempt=env.rl_attempt, delay_sec=delay,
+                                      code=exc.code, message=exc.message)
+            metrics.RETRIES.labels(env.stage, "SELF_THROTTLED", exc.api).inc()
+            lg.info("retry_scheduled", reason="SELF_THROTTLED", api=exc.api, delay_sec=delay)
+            return Outcome.RETRY_SCHEDULED
         rl = env.rl_attempt + 1
         if rl > self.settings.rl_max_retries:
             return await self._dead_letter(env, "RATE_LIMIT_BUDGET_EXHAUSTED",
@@ -116,6 +141,7 @@ class StageRunner:
         await repo.schedule_retry(self.db, env.job_id, stage=env.stage, reason="RATE_LIMITED", api=exc.api,
                                   attempt=env.attempt, rl_attempt=rl, delay_sec=delay, code=exc.code,
                                   message=exc.message)
+        metrics.RETRIES.labels(env.stage, "RATE_LIMITED", exc.api).inc()
         lg.info("retry_scheduled", reason="RATE_LIMITED", api=exc.api, delay_sec=delay, rl_attempt=rl)
         return Outcome.RETRY_SCHEDULED
 
@@ -134,6 +160,7 @@ class StageRunner:
         await repo.schedule_retry(self.db, env.job_id, stage=env.stage, reason="TRANSIENT_ERROR", api=None,
                                   attempt=attempt, rl_attempt=env.rl_attempt, delay_sec=delay, code=code,
                                   message=message)
+        metrics.RETRIES.labels(env.stage, "TRANSIENT_ERROR", "-").inc()
         lg.warning("retry_scheduled", reason="TRANSIENT_ERROR", code=code, delay_sec=delay, attempt=attempt,
                    error=message[:300])
         return Outcome.RETRY_SCHEDULED
@@ -143,6 +170,7 @@ class StageRunner:
         await repo.mark_dead_lettered(self.db, env.job_id, code=code, message=message, stage=env.stage,
                                       attempts=env.attempt)
         await self.broker.publish_dead_letter(env, error)
+        metrics.JOBS_TERMINAL.labels("DEAD_LETTERED").inc()
         lg.error("job_dead_lettered", code=code, error=message[:300])
         return Outcome.DEAD_LETTERED
 

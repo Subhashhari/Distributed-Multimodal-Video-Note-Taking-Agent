@@ -20,4 +20,4 @@ USER app
 
 EXPOSE 8080
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "--factory", "notetaker.gateway.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "--no-access-log"]
+CMD ["uvicorn", "--factory", "notetaker.gateway.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

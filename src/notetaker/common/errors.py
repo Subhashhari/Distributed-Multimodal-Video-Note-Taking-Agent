@@ -26,6 +26,9 @@ class RateLimited(PipelineError):
         super().__init__(message or f"{api} rate limit hit (HTTP 429)", **detail)
         self.api = api
         self.retry_after = retry_after
+        # True when OUR shared limiter parked the stage (no provider 429 happened). These waits don't
+        # consume the rate-limit retry budget: the job is simply queued behind others.
+        self.self_throttled = False
 
 
 class TransientError(PipelineError):

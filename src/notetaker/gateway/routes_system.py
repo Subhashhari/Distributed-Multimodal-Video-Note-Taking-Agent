@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Request
@@ -51,11 +52,21 @@ async def healthz(request: Request):
         workers = []
     healthy = all(v == "ok" for v in checks.values())
     status = "ok" if healthy and workers else ("degraded" if healthy else "unavailable")
+    s = st.settings
+    quota = None
+    if s.llm_rpd and rd == "ok":
+        try:
+            used = int(await st.redis.get(f"rl:llm:day:{datetime.now(UTC):%Y%m%d}") or 0)
+            quota = {"limit_per_day": s.llm_rpd, "remaining_today": max(s.llm_rpd - used, 0)}
+        except Exception:
+            quota = None
     body = {
         "status": status,
         "checks": checks,
         "workers": {"alive": len(workers), "ids": workers},
-        "pipeline_mode": st.settings.pipeline_mode,
+        "pipeline_mode": s.pipeline_mode,
+        "llm": {"provider": s.llm_provider, "model": s.llm_model if not s.llm_model.startswith("__") else None,
+                "rpm": s.llm_rpm, "daily_quota": quota},
         "version": __version__,
     }
     return JSONResponse(body, status_code=200 if healthy else 503)

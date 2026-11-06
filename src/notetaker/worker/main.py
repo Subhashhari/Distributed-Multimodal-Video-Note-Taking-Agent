@@ -15,6 +15,7 @@ import signal
 import socket
 import time
 
+from prometheus_client import start_http_server
 from redis.asyncio import Redis
 
 from .. import __version__
@@ -116,8 +117,11 @@ async def run() -> None:
     broker = Broker(settings, name=f"worker-{worker_id}")
     await broker.connect()
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    runner = StageRunner(settings, db, broker, Faults(redis, settings.demo_faults_enabled),
-                         TokenCipher(settings.message_enc_key), build_handlers(settings), worker_id)
+    faults = Faults(redis, settings.demo_faults_enabled)
+    handlers = build_handlers(settings, redis=redis, faults=faults)
+    runner = StageRunner(settings, db, broker, faults, TokenCipher(settings.message_enc_key), handlers, worker_id)
+    if settings.metrics_port:
+        start_http_server(settings.metrics_port)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

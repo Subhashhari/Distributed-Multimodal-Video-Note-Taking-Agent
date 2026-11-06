@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     llm_tpm: int = 200_000
     llm_rpd: int = 200
     llm_max_concurrency: int = 2
+    limiter_max_wait_sec: float = 20
     llm_chunk_tokens: int = 12_000
     llm_chunk_overlap_sec: int = 15
     llm_max_output_tokens: int = 4000
@@ -88,6 +89,7 @@ class Settings(BaseSettings):
     shutdown_grace_sec: float = 25
     stub_stage_delay_sec: float = 1.0
     heartbeat_ttl_sec: int = 15
+    metrics_port: int = 9100  # worker Prometheus endpoint (0 = disabled)
 
     # --- logging ------------------------------------------------------------
     log_level: str = "INFO"

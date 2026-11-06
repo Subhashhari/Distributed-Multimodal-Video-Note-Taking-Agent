@@ -333,15 +333,32 @@ async def mark_frame_captured(
 
 
 async def mark_frame_failed(
-    db: Database, job_id: uuid.UUID, ts: int, *, code: str, message: str, status: str = "FAILED"
+    db: Database, job_id: uuid.UUID, ts: int, *, code: str, message: str, status: str = "FAILED",
+    warn: bool = True,
 ) -> None:
-    """Mark a frame FAILED/REJECTED and record the job warning in the same transaction."""
+    """Mark a frame FAILED/REJECTED and (optionally) record the job warning in the same transaction."""
     async with db.session() as s, s.begin():
         f = await s.get(Frame, (job_id, ts), with_for_update=True)
         if f is None or f.status not in ("PENDING", "CAPTURED"):
             return
         f.status = status
         f.failure_code = code
+        f.image_jpeg = None
         job = await s.get(Job, job_id, with_for_update=True)
         if job and job.status not in TERMINAL:
-            _append_warning(s, job, {"code": code, "timestamp_sec": ts, "message": message})
+            if warn:
+                _append_warning(s, job, {"code": code, "timestamp_sec": ts, "message": message})
+            else:
+                s.add(JobEvent(job_id=job_id, kind="FRAME_DROPPED", worker_id=job.worker_id,
+                               detail={"code": code, "timestamp_sec": ts, "message": message}))
+
+
+async def update_frame(db: Database, job_id: uuid.UUID, ts: int, **fields: Any) -> None:
+    allowed = {"caption", "notion_file_upload_id", "notion_upload_at"}
+    if set(fields) - allowed:
+        raise ValueError(f"update_frame cannot set {set(fields) - allowed}")
+    async with db.session() as s, s.begin():
+        f = await s.get(Frame, (job_id, ts), with_for_update=True)
+        if f is not None:
+            for k, v in fields.items():
+                setattr(f, k, v)

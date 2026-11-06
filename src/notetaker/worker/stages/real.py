@@ -15,6 +15,7 @@ from ...common import repo
 from ...common.db import utcnow
 from ...common.errors import FatalError, FrameError, RateLimited, TransientError
 from ...common.repo import as_utc
+from .. import metrics
 from ..clients.ffmpeg import capture_frame, downscale_for_vision
 from ..clients.notion import NotionClient, NotionValidationError
 from ..clients.youtube import YouTubeClient, clean_segments
@@ -146,9 +147,11 @@ class Frames:
                                               ctx.settings.frame_timeout_sec)
                     await repo.mark_frame_captured(ctx.db, ctx.job.id, f.timestamp_sec, image=cap.jpeg,
                                                    width=cap.width, height=cap.height, sha256=cap.sha256)
+                    metrics.FRAMES.labels("captured").inc()
                 except FrameError as exc:  # never fails the job; never substituted (Constraint B)
                     await repo.mark_frame_failed(ctx.db, ctx.job.id, f.timestamp_sec, code=exc.code,
                                                  message=f"Frame couldn't be captured: {exc.message[:150]}")
+                    metrics.FRAMES.labels("failed").inc()
                 done += 1
                 await ctx.progress(done / max(len(frames), 1) * (0.8 if ctx.settings.vision_verify else 1.0))
 
@@ -175,6 +178,7 @@ class Frames:
                     await repo.mark_frame_failed(ctx.db, ctx.job.id, f.timestamp_sec, code="FRAME_NOT_RELEVANT",
                                                  message="No informative visual at this moment.", status="REJECTED",
                                                  warn=False)
+                    metrics.FRAMES.labels("rejected_by_vision").inc()
                 elif v.caption.strip():
                     await repo.update_frame(ctx.db, ctx.job.id, f.timestamp_sec, caption=v.caption.strip()[:600])
         await repo.put_artifact(ctx.db, ctx.job.id, "frames:verified", {"done": True})

@@ -1,0 +1,28 @@
+.vnt-take-notes {
+  position: relative;
+  opacity: 0.92;
+}
+.vnt-take-notes:hover { opacity: 1; }
+.vnt-take-notes svg { pointer-events: none; }
+.vnt-take-notes.vnt-busy { opacity: 0.5; cursor: progress; }
+
+.vnt-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%) translateY(8px);
+  max-width: min(520px, 90%);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.94);
+  color: #f9fafb;
+  font: 500 14px/1.4 "Roboto", "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 70;
+}
+.vnt-toast.vnt-show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.vnt-toast[data-kind="ok"] { border-left: 4px solid #22c55e; }
+.vnt-toast[data-kind="error"] { border-left: 4px solid #ef4444; }

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Notes</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="../icons/32.png" alt="" width="20" height="20" />
+      <span>Video Notes</span>
+    </div>
+    <div id="conn" class="conn"></div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="list" aria-live="polite"></main>
+
+  <section id="empty" class="empty" hidden>
+    <div class="empty-icon" aria-hidden="true">📝</div>
+    <p>Open a YouTube video and click <strong>Take Notes</strong> in the player toolbar.</p>
+  </section>
+
+  <section id="connect" class="empty" hidden>
+    <div class="empty-icon" aria-hidden="true">🔗</div>
+    <p>Connect your Notion workspace once. Your notes are published there.</p>
+    <button id="connectBtn" class="btn primary">Connect Notion</button>
+    <p class="hint"><a href="#" id="optionsLink2">Use an integration token instead</a></p>
+  </section>
+
+  <footer class="bottom">
+    <button id="clearBtn" class="link">Clear finished</button>
+    <a href="#" id="optionsLink" class="link">Options</a>
+  </footer>
+
+  <template id="jobTpl">
+    <article class="job">
+      <div class="job-head">
+        <img class="thumb" alt="" width="64" height="36" />
+        <div class="meta">
+          <div class="title"></div>
+          <div class="sub"></div>
+        </div>
+        <button class="x" title="Dismiss" aria-label="Dismiss">×</button>
+      </div>
+      <ol class="steps"></ol>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="line"></div>
+      <ul class="warns"></ul>
+      <div class="actions"></div>
+    </article>
+  </template>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

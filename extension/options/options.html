@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Notes Options</title>
+  <link rel="stylesheet" href="../popup/popup.css" />
+  <style>
+    body { width: auto; max-width: 640px; margin: 24px auto; padding: 0 16px; max-height: none; display: block; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 24px 0 8px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    label { display: block; font-weight: 600; margin: 10px 0 4px; }
+    input, select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+      background: var(--bg); color: var(--text); font: inherit; }
+    .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .msg { margin-top: 8px; font-weight: 600; }
+    .msg.ok { color: var(--green); } .msg.err { color: var(--red); }
+    code { background: var(--line); padding: 1px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Video Notes Options</h1>
+  <p class="muted">Turns YouTube videos into Notion study notes with real, captioned frames.</p>
+
+  <h2>Notes server</h2>
+  <div class="card">
+    <label for="gateway">Gateway URL</label>
+    <input id="gateway" placeholder="http://localhost:8080" />
+    <div class="row">
+      <button id="saveGateway" class="btn primary">Save & test</button>
+      <span id="gatewayMsg" class="msg"></span>
+    </div>
+  </div>
+
+  <h2>Notion</h2>
+  <div class="card">
+    <div id="notionStatus"></div>
+    <div class="row">
+      <button id="connect" class="btn primary">Connect with Notion</button>
+      <button id="disconnect" class="btn">Disconnect</button>
+    </div>
+    <label for="token">Or paste an internal integration token</label>
+    <input id="token" type="password" placeholder="ntn_…" autocomplete="off" />
+    <p class="muted">Create one at notion.so/my-integrations, then share a page with it (••• → Connections).</p>
+    <div class="row"><button id="useToken" class="btn">Use token</button></div>
+
+    <label for="parent">Publish notes under</label>
+    <select id="parent"><option value="">Server default</option></select>
+    <div class="row">
+      <button id="refreshPages" class="btn">Refresh pages</button>
+      <button id="saveParent" class="btn primary">Save destination</button>
+    </div>
+    <span id="notionMsg" class="msg"></span>
+  </div>
+
+  <h2>Developer / demo options</h2>
+  <div class="card">
+    <label for="failFrames">Force these frame timestamps to fail (seconds, comma-separated)</label>
+    <input id="failFrames" placeholder="e.g. 461, 600" />
+    <p class="muted">Only honoured when the server runs with <code>DEMO_FAULTS_ENABLED=true</code>. Use it to
+      demo graceful degradation (COMPLETED_WITH_WARNINGS).</p>
+    <div class="row"><button id="saveDev" class="btn">Save</button><span id="devMsg" class="msg"></span></div>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

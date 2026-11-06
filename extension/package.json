@@ -1,0 +1,6 @@
+{
+  "name": "video-notes-extension",
+  "private": true,
+  "type": "module",
+  "description": "Chrome MV3 extension. No build step: load this folder unpacked. This file only tells Node (for tests) that .js files are ES modules; Chrome ignores it."
+}

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Video Notes to Notion",
+  "short_name": "Video Notes",
+  "version": "1.0.0",
+  "description": "Turn YouTube videos into study notes with real captioned frames, published to Notion.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoJiJxFmxEVizfiwM8rE7G1wZbpdDdEQKU0sAPZ4kO+ieuA1GTiWwUq3P4aq56D3McPvG8PVMbjEa1cHvtfouS9yv7+AO4xrJIUwCbk0m+ktXfLThlaPfKhfBx5YP0iReEe4CH4olnt+iuZMZ+chVf1nUv3+FkoS3jVqy+FFYZ3kIfkoOMmOn82vfL3txyfj0uyXSEhKVFu0iFSZSg9mrwh4qWvL2Rtef0AuDgWbnj2JsNZI3PMPdhIaaLZuOC4EiMzIh16EeLM+8OI9nrCZglQ1EpkzoKmUo7mdb+13nolnXaxtYtRzBAqOmerVJgRIF9XPz0xRKUeCR2NQCccwvjQIDAQAB",
+  "permissions": ["storage", "identity", "alarms", "notifications"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://api.notion.com/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content/youtube.js"],
+      "css": ["content/youtube.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Video Notes",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "options_page": "options/options.html"
+}

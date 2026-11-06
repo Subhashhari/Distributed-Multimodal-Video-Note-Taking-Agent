@@ -1,0 +1,94 @@
+# Video Notes Agent: full stack
+#   docker compose up -d --build              # gateway + broker + postgres + redis + 2 workers
+#   docker compose up -d --scale worker=4     # scale the worker pool
+#   docker compose kill -s SIGKILL worker     # (or kill a single container by name) crash demo
+name: video-notes
+
+x-app: &app
+  env_file: .env
+  environment:
+    AUTO_CREATE_SCHEMA: "false"   # the one-shot "migrate" service creates the schema
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    migrate: { condition: service_completed_successfully }
+
+services:
+  gateway:
+    <<: *app
+    build: { context: ., dockerfile: services/gateway/Dockerfile }
+    image: video-notes-gateway:local
+    ports: ["${GATEWAY_PORT:-8080}:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/livez"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    <<: *app
+    build: { context: ., dockerfile: services/worker/Dockerfile }
+    image: video-notes-worker:local
+    deploy:
+      replicas: 2                 # ≥ 2 independent workers
+    stop_grace_period: 30s        # SIGTERM → finish current stage, then exit
+
+  migrate:
+    build: { context: ., dockerfile: services/gateway/Dockerfile }
+    image: video-notes-gateway:local
+    env_file: .env
+    command: ["python", "-m", "notetaker.common.migrate"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-notes}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-notes}
+    ports:
+      - "5672:5672"
+      - "15672:15672"             # management UI: http://localhost:15672 (inspect queues + DLQ)
+    volumes: [rabbitmq-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-notes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notes}
+      POSTGRES_DB: ${POSTGRES_DB:-notes}
+    ports: ["5432:5432"]
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notes} -d ${POSTGRES_DB:-notes}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-data: {}
+  pg-data: {}
+  redis-data: {}

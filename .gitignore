@@ -1,0 +1,31 @@
+# secrets
+.env
+*.cookies.txt
+cookies.txt
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# local data
+*.db
+tmp/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# extension packaging
+extension.zip

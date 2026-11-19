@@ -9,7 +9,7 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from ...common.config import Settings
-from ...common.errors import FatalError, RateLimited
+from ...common.errors import FatalError, RateLimited, TransientError
 from ...common.logging import get_logger
 from .. import metrics
 from ..pipeline import prompts
@@ -27,6 +27,9 @@ from .providers import Provider, build_provider
 
 log = get_logger(__name__)
 T = TypeVar("T", bound=BaseModel)
+
+# Provider failures where trying the fallback model makes sense (overload, timeouts, empty answers).
+FALLBACK_CODES = {"LLM_UNAVAILABLE", "LLM_TIMEOUT", "LLM_UNREACHABLE", "LLM_EMPTY"}
 
 
 def _extract_json(text: str) -> str:
@@ -59,14 +62,15 @@ class LLMService:
                 f"{user}\n\nYour previous answer was invalid ({last_err}). Return ONLY valid JSON for the schema.")
             try:
                 text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est, vision)
-            except RateLimited as exc:
-                if exc.code == "LLM_DAILY_QUOTA" and self.fallback and provider is not self.fallback:
-                    log.warning("llm_fallback", reason="daily quota", fallback=self.fallback.name)
-                    provider = self.fallback
-                    text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est,
-                                                      vision, limit=False)
-                else:
+            except (RateLimited, TransientError) as exc:
+                if not self._should_fall_back(exc) or provider is self.fallback:
                     raise
+                log.warning("llm_fallback", reason=exc.code, primary=getattr(provider, "model", provider.name),
+                            fallback=getattr(self.fallback, "model", self.fallback.name))
+                metrics.LLM_FALLBACKS.labels(exc.code).inc()
+                provider = self.fallback
+                text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est, vision,
+                                                  limit=exc.code != "LLM_DAILY_QUOTA")
             try:
                 return model_cls.model_validate(json.loads(_extract_json(text)))
             except (ValueError, ValidationError) as exc:
@@ -74,8 +78,18 @@ class LLMService:
                 log.warning("llm_invalid_output", attempt=attempt + 1, error=last_err)
         raise FatalError(f"The AI model returned invalid output twice: {last_err}", code="LLM_INVALID_OUTPUT")
 
+    def _should_fall_back(self, exc: Exception) -> bool:
+        """Fall back for a daily-quota stop or an overloaded/unresponsive model, never for a per-minute 429
+        (that is ours to pace) or a request/auth error (the fallback would fail the same way)."""
+        if self.fallback is None:
+            return False
+        if isinstance(exc, RateLimited):
+            return exc.code == "LLM_DAILY_QUOTA"
+        return getattr(exc, "code", "") in FALLBACK_CODES
+
     async def _limited(self, provider, system, user, schema, images, max_out, est, vision, limit=True):
-        model = (self.settings.llm_vision_model or None) if vision else None
+        # LLM_VISION_MODEL belongs to the primary provider; the fallback always uses its own model.
+        model = (self.settings.llm_vision_model or None) if (vision and provider is self.provider) else None
         if self.faults is not None:  # demo: synthetic 429 at the client boundary (same code path as a real one)
             await self.faults.check_rate_limit("llm")
         if not limit or provider.name in ("mock", "ollama"):
@@ -115,7 +129,9 @@ class LLMService:
 def build_llm_service(settings: Settings, limiter: RateLimiter, faults=None) -> LLMService:
     provider = build_provider(settings, settings.llm_provider, settings.llm_model)
     fallback = None
-    if settings.llm_fallback_provider:
-        fallback = build_provider(settings, settings.llm_fallback_provider,
+    # Either a different provider (e.g. ollama) or just a different model of the same provider
+    # (e.g. a lighter Gemini model that is less often overloaded).
+    if settings.llm_fallback_provider or settings.llm_fallback_model:
+        fallback = build_provider(settings, settings.llm_fallback_provider or settings.llm_provider,
                                   settings.llm_fallback_model or settings.llm_model)
     return LLMService(settings, limiter, provider, fallback, faults)

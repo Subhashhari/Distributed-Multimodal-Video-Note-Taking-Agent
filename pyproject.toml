@@ -23,6 +23,8 @@ worker = [
     "yt-dlp>=2025.1.1",
     "youtube-transcript-api>=1.0",
     "pillow>=10.0",
+    "faster-whisper>=1.1",  # local speech-to-text fallback when YouTube captions are blocked
+    "av>=15,<19",           # PyAV 19 dropped an argument faster-whisper 1.2 still passes
 ]
 dev = [
     "notetaker[worker]",

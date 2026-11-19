@@ -10,10 +10,14 @@ Rules:
 1. Use ONLY information in the transcript. Never add outside facts.
 2. Group the content into sections in chronological order, each with a short descriptive heading,
    its start_sec/end_sec (seconds), and 3-7 information-dense bullets (each under 30 words).
-3. visual_moments: flag a timestamp ONLY when the transcript shows evidence that something visual and
-   informative is on screen: a slide, diagram, chart, table, equation, code, whiteboard, or demo
-   (cues like "as you can see", "this slide", "this diagram", "on the screen", "here we have",
-   "let me show you"). Choose a time 1-3 seconds AFTER the cue. Do not flag talking-head moments.
+3. visual_moments: flag timestamps where something visual and informative is very likely on screen:
+   a slide, diagram, chart, graph, table, equation, code, whiteboard, animation or demo. Evidence can be
+   an explicit cue ("as you can see", "this slide", "here we have", "let me show you", "look at") OR
+   narration that is clearly describing a visual (walking through an equation, a graph's axes, a
+   network diagram, numbers in a table, lines of code). Choose a time a few seconds AFTER the visual is
+   introduced, once it is fully shown. Do not flag pure talking-head moments, intros or outros.
+   For visual content, aim for about one moment per section (typically 4-8 for a 15-20 minute video,
+   fewer for short or non-visual videos). A vision model checks every frame later, so prefer recall.
 4. Every visual moment needs:
    - caption: what is most likely shown on screen (one or two sentences)
    - why_flagged: the transcript evidence for flagging it (quote or paraphrase)

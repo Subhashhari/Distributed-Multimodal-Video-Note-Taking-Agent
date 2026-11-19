@@ -71,7 +71,7 @@ class YouTubeClient:
             await self.faults.check_rate_limit("youtube")
 
     def _ydl_opts(self, **extra) -> dict:
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
+        opts = {"quiet": True, "no_warnings": True, "noprogress": True, "skip_download": True, "noplaylist": True,
                 "socket_timeout": 20, "retries": 1, "extractor_retries": 1}
         if self.settings.ytdlp_cookies_file:
             opts["cookiefile"] = self.settings.ytdlp_cookies_file
@@ -126,20 +126,61 @@ class YouTubeClient:
 
     # ------------------------------------------------------------------ transcript
     async def transcript(self, info: VideoInfo) -> tuple[list[dict], dict]:
-        """Returns (segments, meta). Order: transcript API (manual → auto) → yt-dlp captions."""
+        """Returns (segments, meta). Fallback chain:
+        1. youtube-transcript-api (manual captions, then auto-generated)
+        2. yt-dlp caption tracks (json3)
+        3. local speech-to-text (faster-whisper) on the audio stream, when WHISPER_FALLBACK=true.
+           Captions 1 and 2 share YouTube's timedtext endpoint, which often throttles an IP for
+           hours (HTTP 429 / IpBlocked). Audio comes from a different endpoint, so 3 still works.
+        """
         langs = [x.strip() for x in self.settings.transcript_langs.split(",") if x.strip()]
-        try:
-            segs, meta = await self._via_transcript_api(info.video_id, langs)
-            if segs:
-                return segs, meta
-        except RateLimited:
-            raise
-        except Exception as exc:  # fall through to yt-dlp captions
-            log.info("transcript_api_failed", video_id=info.video_id, error=str(exc)[:200])
-        segs, meta = await self._via_ytdlp_captions(info, langs)
-        if segs:
-            return segs, meta
+        blocked: Exception | None = None  # remember a throttling error to re-raise if nothing works
+        for name, attempt in (("transcript_api", lambda: self._via_transcript_api(info.video_id, langs)),
+                              ("ytdlp_captions", lambda: self._via_ytdlp_captions(info, langs))):
+            try:
+                segs, meta = await attempt()
+                if segs:
+                    return segs, meta
+            except (RateLimited, TransientError) as exc:
+                blocked = exc
+                log.warning("transcript_source_blocked", source=name, video_id=info.video_id, error=exc.message)
+            except Exception as exc:  # no captions / disabled / parse problem → next source
+                log.info("transcript_source_failed", source=name, video_id=info.video_id, error=str(exc)[:200])
+        if self.settings.whisper_fallback:
+            return await self._via_whisper(info)
+        if blocked is not None:
+            raise blocked  # retried with backoff; the throttle usually lifts later
         raise FatalError("This video has no captions we could use.", code="TRANSCRIPT_UNAVAILABLE")
+
+    async def _via_whisper(self, info: VideoInfo) -> tuple[list[dict], dict]:
+        import tempfile
+
+        import yt_dlp
+
+        log.info("whisper_fallback_started", video_id=info.video_id, model=self.settings.whisper_model)
+        await self._fault()
+        with tempfile.TemporaryDirectory(prefix="vn-audio-") as tmp:
+            opts = self._ydl_opts(skip_download=False, format="ba[ext=m4a]/ba/b[height<=360]/b",
+                                  outtmpl=f"{tmp}/audio.%(ext)s")
+
+            def download() -> str:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    data = ydl.extract_info(f"https://www.youtube.com/watch?v={info.video_id}", download=True)
+                    return ydl.prepare_filename(data)
+
+            async with self.limiter.limit("youtube"):
+                try:
+                    path = await asyncio.to_thread(download)
+                    metrics.EXTERNAL_REQUESTS.labels("youtube", "200").inc()
+                except yt_dlp.utils.DownloadError as exc:
+                    metrics.EXTERNAL_REQUESTS.labels("youtube", "error").inc()
+                    raise classify_ytdlp_error(str(exc)) from exc
+            segs, language = await asyncio.to_thread(transcribe_audio, path, self.settings)
+        if not segs:
+            raise FatalError("No speech could be transcribed from this video.", code="TRANSCRIPT_UNAVAILABLE")
+        log.info("whisper_fallback_done", video_id=info.video_id, segments=len(segs), language=language)
+        return segs, {"language": language, "source": f"whisper-{self.settings.whisper_model}",
+                      "auto_generated": True}
 
     async def _via_transcript_api(self, video_id: str, langs: list[str]) -> tuple[list[dict], dict]:
         from youtube_transcript_api import YouTubeTranscriptApi
@@ -200,6 +241,26 @@ class YouTubeClient:
                 if segs:
                     return segs, {"language": lang, "source": f"yt-dlp-{source}", "auto_generated": generated}
         return [], {}
+
+
+_WHISPER_MODEL = None
+
+
+def transcribe_audio(path: str, settings: Settings) -> tuple[list[dict], str]:
+    """Local, free speech-to-text (CPU, int8). The model is loaded once per worker process."""
+    global _WHISPER_MODEL
+    import os
+
+    from faster_whisper import WhisperModel
+
+    if _WHISPER_MODEL is None:
+        _WHISPER_MODEL = WhisperModel(settings.whisper_model, device="cpu", compute_type="int8",
+                                      cpu_threads=max(os.cpu_count() or 2, 2),
+                                      download_root=settings.whisper_model_dir or None)
+    segments, info = _WHISPER_MODEL.transcribe(path, vad_filter=True, beam_size=1)
+    out = [{"start": float(s.start), "dur": float(s.end - s.start), "text": s.text.strip()}
+           for s in segments if s.text.strip()]
+    return out, info.language
 
 
 def parse_json3(data: dict) -> list[dict]:

@@ -21,5 +21,6 @@ LIMITER_WAIT = Histogram(
 )
 SELF_THROTTLED = Counter("notes_self_throttled_total", "Stages parked because shared capacity was full", ["api"])
 LLM_TOKENS = Counter("notes_llm_tokens_total", "LLM tokens used", ["direction"])
+LLM_FALLBACKS = Counter("notes_llm_fallbacks_total", "Calls retried on the fallback LLM", ["reason"])
 FRAMES = Counter("notes_frames_total", "Frame outcomes", ["outcome"])
 WORKER_BUSY = Gauge("notes_worker_busy", "1 while this worker is processing a message")

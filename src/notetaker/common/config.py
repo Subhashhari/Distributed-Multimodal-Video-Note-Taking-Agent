@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     llm_tpm: int = 200_000
     llm_rpd: int = 200
     llm_max_concurrency: int = 2
+    llm_thinking_level: str = ""  # Gemini: "", "minimal", "low", "medium", "high" ("" = model default)
+    llm_timeout_sec: float = 120
     limiter_max_wait_sec: float = 20
     llm_chunk_tokens: int = 12_000
     llm_chunk_overlap_sec: int = 15
@@ -63,8 +65,9 @@ class Settings(BaseSettings):
     youtube_max_concurrency: int = 3
     ytdlp_cookies_file: str = ""
     transcript_langs: str = "en,en-US,en-GB"
-    whisper_fallback: bool = False
+    whisper_fallback: bool = True  # transcribe the audio locally when YouTube captions are blocked/missing
     whisper_model: str = "base"
+    whisper_model_dir: str = ""  # the worker image pre-downloads the model to /opt/whisper
 
     # --- constraints & frames -----------------------------------------------
     max_video_seconds: int = 1200

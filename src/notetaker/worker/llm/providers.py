@@ -68,6 +68,8 @@ class GeminiProvider:
         self.key = settings.llm_api_key
         self.model = model
         self.base = settings.llm_base_url or self.base
+        self.thinking_level = settings.llm_thinking_level.strip().lower()
+        self.timeout = settings.llm_timeout_sec
 
     async def generate_json(self, *, system, user, schema, images, max_output_tokens, model=None):
         parts: list[dict] = [{"text": user}]
@@ -82,8 +84,10 @@ class GeminiProvider:
                 "temperature": 0.2,
             },
         }
+        if self.thinking_level:  # newer Gemini models "think" first; "low" is faster and leaves tokens for JSON
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
         url = f"{self.base}/models/{model or self.model}:generateContent"
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await send(client, "llm", "POST", url, json=body, headers={"x-goog-api-key": self.key})
         if resp.status_code == 429:
             text = resp.text
@@ -102,9 +106,17 @@ class GeminiProvider:
         cands = data.get("candidates") or []
         if not cands:
             raise TransientError("Gemini returned no candidates (possibly blocked)", code="LLM_EMPTY")
-        text = "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []))
+        parts = cands[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         um = data.get("usageMetadata", {})
-        return text, Usage(um.get("promptTokenCount", 0), um.get("candidatesTokenCount", 0))
+        usage = Usage(um.get("promptTokenCount", 0),
+                      um.get("candidatesTokenCount", 0) + um.get("thoughtsTokenCount", 0))
+        if not text.strip():
+            reason = cands[0].get("finishReason", "UNKNOWN")
+            hint = (" (thinking used the whole output budget: raise LLM_MAX_OUTPUT_TOKENS"
+                    " or set LLM_THINKING_LEVEL=low)") if reason == "MAX_TOKENS" else ""
+            raise TransientError(f"Gemini returned an empty answer, finishReason={reason}{hint}", code="LLM_EMPTY")
+        return text, usage
 
 
 def _gemini_retry_delay(text: str) -> float | None:

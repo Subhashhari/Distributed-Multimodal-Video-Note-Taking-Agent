@@ -42,6 +42,18 @@ transcript, LLM and Notion steps. Switch to `PIPELINE_MODE=real` once the keys b
 - **RabbitMQ UI:** <http://localhost:15672> (`notes` / `notes`): queues, unacked messages, `jobs.dlq`
 - **Grafana (optional):** `docker compose --profile obs up -d` then <http://localhost:3000>
 
+### 1.1 macOS (Apple Silicon or Intel)
+Everything runs in Docker, and every image is multi-arch, so the steps are the same. Mac-specific notes:
+1. Install **Docker Desktop for Mac** (pick the Apple chip or Intel build) and start it. Under
+   Settings → Resources, give it at least **4 GB memory** (the speech-to-text fallback needs about 1 GB per worker).
+2. Use `python3` instead of `python` for the demo script and the key-generation commands in `.env.example`
+   (macOS ships `python3` only): `python3 scripts/demo.py health`.
+3. If `docker compose up` says a port is already allocated (often Homebrew `postgres` or `redis`), set
+   `POSTGRES_HOST_PORT=5433` (or `REDIS_HOST_PORT`, `RABBITMQ_HOST_PORT`, `GATEWAY_PORT`) in `.env`.
+   The containers still talk to each other on the default ports.
+4. The first `docker compose up -d --build` takes a few minutes (it bakes the Whisper model into the worker image).
+5. The extension works the same in Chrome on macOS: `chrome://extensions` → Load unpacked → `extension/`.
+
 ## 2. Real mode setup
 
 ### 2.1 LLM (free: Gemini API free tier)
@@ -195,6 +207,8 @@ ruff check src tests
 
 | Symptom | Fix |
 |---|---|
+| `Bind for 0.0.0.0:5432 failed: port is already allocated` | Something else uses that port. Set `POSTGRES_HOST_PORT` (or the matching `*_HOST_PORT`) in `.env` |
+| `python: command not found` (macOS) | Use `python3` |
 | `/healthz` shows `workers.alive: 0` | `docker compose logs worker`. Usually `MESSAGE_ENC_KEY` is missing or invalid |
 | "Notion page wasn't found" | Share the page with the integration (page `•••` → Connections) |
 | "YouTube blocked the request (bot check)" | Export browser cookies to a file, mount it, and set `YTDLP_COOKIES_FILE` |

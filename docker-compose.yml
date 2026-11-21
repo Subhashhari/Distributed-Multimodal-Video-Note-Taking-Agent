@@ -50,8 +50,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-notes}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-notes}
     ports:
-      - "5672:5672"
-      - "15672:15672"             # management UI: http://localhost:15672 (inspect queues + DLQ)
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_HOST_PORT:-15672}:15672"          # management UI: http://localhost:15672 (inspect queues + DLQ)
     volumes: [rabbitmq-data:/var/lib/rabbitmq]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -67,7 +67,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-notes}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notes}
       POSTGRES_DB: ${POSTGRES_DB:-notes}
-    ports: ["5432:5432"]
+    ports: ["${POSTGRES_HOST_PORT:-5432}:5432"]   # host side only; containers use postgres:5432
     volumes: [pg-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notes} -d ${POSTGRES_DB:-notes}"]
@@ -79,7 +79,7 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
-    ports: ["6379:6379"]
+    ports: ["${REDIS_HOST_PORT:-6379}:6379"]
     volumes: [redis-data:/data]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

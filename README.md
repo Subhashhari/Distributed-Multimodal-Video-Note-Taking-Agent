@@ -68,16 +68,19 @@ No paid API is needed. Alternatives: `LLM_PROVIDER=ollama` (local and offline, s
 `openai_compat` (Groq, OpenRouter, GitHub Models and similar, via `LLM_BASE_URL`), or `mock`.
 
 ### 2.2 Notion
-1. In Notion, create a page called **Video Notes**.
-2. <https://www.notion.so/my-integrations> → **New integration** → type **Public**.
+Notion calls integrations **connections** now; they live at <https://app.notion.com/developers/connections>.
+1. In Notion, create a top-level page called **Video Notes**.
+2. In the developer portal: **New connection** → name it → **Authentication method: OAuth**.
    - Redirect URI: `https://cfaokfnedgejbfoelphincfdjinidhpb.chromiumapp.org/notion`
      (the extension ships with a fixed key, so this ID is the same on every machine)
-   - Capabilities: Read, Update, Insert content.
-3. Copy the OAuth **client ID** and **client secret** into `NOTION_OAUTH_CLIENT_ID` and `NOTION_OAUTH_CLIENT_SECRET`.
+   - Installable in: **Any workspace** (no Marketplace listing is needed), then **Create connection**.
+3. On the connection's **Configuration** tab enable **Read, Update, Insert content** and copy the
+   **OAuth client ID** and **client secret** into `NOTION_OAUTH_CLIENT_ID` and `NOTION_OAUTH_CLIENT_SECRET`.
 4. Set `PIPELINE_MODE=real`, then run `docker compose up -d` (this recreates the containers with the new values).
 
-*Quicker alternative for graders:* create an **Internal** integration, share the Video Notes page with it
-(page `•••` → Connections), and paste its token in the extension's **Options** page.
+*Quicker alternative for graders:* create a connection with **Authentication method: API token**, give it
+access to the Video Notes page (connection → **Content access** → **Edit access**, or page `•••` →
+**Connections** → **+ Add connection**), and paste its token in the extension's **Options** page.
 
 ### 2.3 Load the extension (no build step)
 1. Open `chrome://extensions` and enable **Developer mode**.

@@ -110,6 +110,35 @@ VERDICT_SCHEMA = {
 }
 
 
+def _mmss_digits_to_sec(v: float) -> float | None:
+    """710 -> 430 (the model wrote "7:10" as 710). None if v can't be MMSS digits."""
+    n = int(v)
+    return float((n // 100) * 60 + n % 100) if n % 100 < 60 else None
+
+
+def repair_times(res: ChunkSynthesis, lo: float, hi: float, slack: float = 5) -> ChunkSynthesis:
+    """Make the model's times usable for the chunk [lo, hi] (seconds).
+
+    1. If times overshoot the chunk and every value reads as MM:SS digits that fit once converted
+       (710 = 7:10 = 430 s), convert them all.
+    2. Clamp sections into [lo, hi] and keep start <= end; sections stay in chunk order.
+    Visual moments are not clamped (the caller drops out-of-range ones rather than moving a frame).
+    """
+    values = [x for s in res.sections for x in (s.start_sec, s.end_sec)] + [m.timestamp_sec for m in res.visual_moments]
+    # MM:SS digits overshoot by ~60% (16:23 -> 1623 vs 983 s); a small overshoot is just clamped below.
+    if values and max(values) > hi + max(30.0, 0.2 * hi):
+        converted = [_mmss_digits_to_sec(v) for v in values]
+        if all(c is not None for c in converted) and max(converted) <= hi + slack:
+            for s in res.sections:
+                s.start_sec, s.end_sec = _mmss_digits_to_sec(s.start_sec), _mmss_digits_to_sec(s.end_sec)
+            for m in res.visual_moments:
+                m.timestamp_sec = _mmss_digits_to_sec(m.timestamp_sec)
+    for s in res.sections:
+        s.start_sec = min(max(s.start_sec, lo), hi)
+        s.end_sec = min(max(s.end_sec, s.start_sec), hi)
+    return res
+
+
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
 

@@ -213,10 +213,10 @@ class MockProvider:
                                           for t in ts]}), Usage(10, 10)
         if "sections" not in schema.get("properties", {}):
             return json.dumps({"tldr": ["Mock summary of the whole video."]}), Usage(10, 10)
-        lines = re.findall(r"^\[(\d+):(\d+)\] (.+)$", user, flags=re.MULTILINE)
+        lines = re.findall(r"^\[(\d+)s\] (.+)$", user, flags=re.MULTILINE)
         rng = re.search(r"time range (\d+)s to (\d+)s", user)
         start, end = (int(rng.group(1)), int(rng.group(2))) if rng else (0, 60)
-        pts = [(int(m) * 60 + int(s), t) for m, s, t in lines] or [(start, "content")]
+        pts = [(int(s), t) for s, t in lines] or [(start, "content")]
         n = min(3, len(pts))
         size = max(len(pts) // n, 1)
         sections, moments = [], []

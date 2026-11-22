@@ -22,7 +22,7 @@ from ..clients.youtube import YouTubeClient, clean_segments
 from ..context import StageContext
 from ..llm import LLMService
 from ..pipeline.notion_blocks import PublishedFrame, build_page_blocks
-from ..pipeline.synthesis import ChunkSynthesis, merge_chunks, select_moments
+from ..pipeline.synthesis import ChunkSynthesis, merge_chunks, repair_times, select_moments
 from ..pipeline.transcript import chunk_transcript
 from ..ratelimit import RateLimiter
 
@@ -81,6 +81,7 @@ class Summarize:
             saved = await repo.get_artifact(ctx.db, ctx.job.id, key)
             if saved is None:
                 res = await self.llm.synthesize(ch, len(chunks), tr["title"], tr.get("chapters", []), prev_heading)
+                res = repair_times(res, ch.start, min(ch.end, duration))
                 lo, hi = ch.start - 5, ch.end + 5  # keep only moments inside this chunk
                 res.visual_moments = [m for m in res.visual_moments if lo <= m.timestamp_sec <= hi]
                 await repo.put_artifact(ctx.db, ctx.job.id, key, res.model_dump())

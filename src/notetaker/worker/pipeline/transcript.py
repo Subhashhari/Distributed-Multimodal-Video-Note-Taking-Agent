@@ -33,7 +33,7 @@ class Chunk:
     index: int
     start: float
     end: float
-    text: str  # lines "[MM:SS] text"
+    text: str  # lines "[<seconds>s] text"
 
     @property
     def tokens(self) -> int:
@@ -45,7 +45,8 @@ def chunk_transcript(segments: list[dict], max_tokens: int, overlap_sec: float, 
     lines = merge_windows(segments)
     if not lines:
         return []
-    rendered = [f"[{mmss(ln['start'])}] {ln['text']}" for ln in lines]
+    # Plain seconds, not MM:SS: small models turned "[07:10]" into 710 instead of 430.
+    rendered = [f"[{int(ln['start'])}s] {ln['text']}" for ln in lines]
     chunks: list[Chunk] = []
     i = 0
     while i < len(lines):

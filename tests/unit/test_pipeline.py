@@ -7,12 +7,14 @@ from notetaker.worker.clients.ffmpeg import validate_jpeg
 from notetaker.worker.clients.youtube import classify_ytdlp_error, clean_segments, parse_json3
 from notetaker.worker.llm.providers import MockProvider, _gemini_schema
 from notetaker.worker.pipeline.notion_blocks import PublishedFrame, build_page_blocks, text
+from notetaker.worker.pipeline.prompts import verify_user
 from notetaker.worker.pipeline.synthesis import (
     CHUNK_SCHEMA,
     ChunkSynthesis,
     Section,
     VisualMoment,
     merge_chunks,
+    repair_times,
     select_moments,
 )
 from notetaker.worker.pipeline.transcript import chunk_transcript, mmss
@@ -132,3 +134,40 @@ async def test_mock_provider_output_validates():
                                                      schema=CHUNK_SCHEMA, images=[], max_output_tokens=100)
     res = ChunkSynthesis.model_validate(json.loads(text_out))
     assert res.sections and all(0 <= m.timestamp_sec <= 300 for m in res.visual_moments)
+
+
+def test_transcript_lines_use_plain_seconds():
+    """'[07:10]' was read as 710 s by Flash Lite; the LLM now only ever sees seconds."""
+    chunk = chunk_transcript([{"start": 430.85, "dur": 2, "text": "Here's what you do"}], 12000, 15, 983)[0]
+    assert chunk.text == "[430s] Here's what you do"
+
+
+def _riemann_chunk():
+    # Real output from job d8052c (983 s video): every time was MM:SS written as digits.
+    return ChunkSynthesis(
+        sections=[Section(heading=h, start_sec=a, end_sec=b, bullets=["x"])
+                  for h, a, b in [("Primes", 1, 430), ("Euler", 431, 733), ("Riemann", 734, 1231),
+                                  ("Prediction", 1232, 1623)]],
+        visual_moments=[VisualMoment(timestamp_sec=t, caption="cap", why_flagged="why") for t in (304, 710, 953)])
+
+
+def test_repair_times_converts_mmss_digits():
+    res = repair_times(_riemann_chunk(), 0, 983)
+    assert [(s.start_sec, s.end_sec) for s in res.sections] == [(1, 270), (271, 453), (454, 751), (752, 983)]
+    assert [m.timestamp_sec for m in res.visual_moments] == [184, 430, 593]  # 7:10 -> 430 s, the quoted line
+
+
+def test_repair_times_leaves_correct_seconds_and_only_clamps_small_overshoot():
+    res = ChunkSynthesis(sections=[Section(heading="A", start_sec=0, end_sec=500, bullets=["x"]),
+                                   Section(heading="B", start_sec=500, end_sec=1000, bullets=["y"])],
+                         visual_moments=[VisualMoment(timestamp_sec=430, caption="cap", why_flagged="why")])
+    res = repair_times(res, 0, 983)
+    assert [(s.start_sec, s.end_sec) for s in res.sections] == [(0, 500), (500, 983)]
+    assert res.visual_moments[0].timestamp_sec == 430
+
+
+def test_verify_prompt_does_not_leak_expected_caption():
+    class F:
+        timestamp_sec, caption, why_flagged = 710, "Zeta function as an infinite product", "narrator says X"
+    prompt = verify_user([F()])
+    assert "infinite product" not in prompt and "narrator says X" in prompt

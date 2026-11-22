@@ -129,6 +129,8 @@ Production backoff is 10 s / 30 s / 90 s.
 
 Other checks:
 - **Scaling:** `docker compose up -d --scale worker=4`. Work spreads evenly, and the global LLM limit still holds.
+  Any later `docker compose up` without `--scale` goes back to the default 2 workers, so repeat the flag
+  (e.g. `docker compose --profile obs up -d --scale worker=4`).
 - **Burst:** click Take Notes on several videos in a row, or `demo.py burst <url1> <url2> ...`. The queue
   fills and drains, and Grafana's *HTTP 429s* panel stays at 0 for `llm`.
 - **Constraint A (≤ 20 min):** a longer video is rejected immediately by the extension or gateway (`VIDEO_TOO_LONG`).

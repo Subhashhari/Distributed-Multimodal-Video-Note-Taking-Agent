@@ -122,7 +122,7 @@ afterwards with `python scripts/demo.py faults clear`.
 | **HTTP 429** from any API | `demo.py faults set llm_429=2` (or `notion_429`, `youtube_429`), then submit a video | Popup shows *"The AI service is busy, retrying in 10s (attempt 1 of 6)"*, then 30 s, then the job completes. It is never shown as an error |
 | **Worker crash** | `demo.py crash https://youtu.be/<id>` | Script waits for EXTRACTING_FRAMES and SIGKILLs that worker container. Another worker resumes within ~1 s (`REDELIVERED` event) and finishes. Exactly **one** Notion page. Restart with `docker compose up -d worker` |
 | **Graceful degradation** | `demo.py faults set frame_fail_rate=0.5` (1.0 = all frames) or Options → *force frame timestamps to fail* | `COMPLETED_WITH_WARNINGS` with a page containing the frames that succeeded (text-only if all failed), and the popup lists which timestamps were omitted |
-| **Dead-letter queue** | Submit a private/removed video, or `demo.py submit <url> --unavailable` | Retries 1/5 … 5/5, then `DEAD_LETTERED`. The message sits in `jobs.dlq` (RabbitMQ UI); `demo.py dlq` lists it |
+| **Dead-letter queue** | Submit a private/removed video, or `demo.py submit <url> --unavailable` | Attempts 1/5 … 4/5 are retried with backoff; the 5th failure moves it to `DEAD_LETTERED`. The message sits in `jobs.dlq` (RabbitMQ UI); `demo.py dlq` lists it |
 
 Set `RETRY_PROFILE=demo` in `.env` for a 2 s / 4 s / 8 s backoff, which takes the DLQ demo to about 25 s.
 Production backoff is 10 s / 30 s / 90 s.
@@ -194,6 +194,8 @@ Everything is documented inline in [.env.example](.env.example). The important o
   never stored or logged.
 
 ## 8. Development
+
+Requires **Python 3.12** (the same version as the Docker images; some worker wheels are not yet published for newer Pythons).
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate     # macOS/Linux: source .venv/bin/activate

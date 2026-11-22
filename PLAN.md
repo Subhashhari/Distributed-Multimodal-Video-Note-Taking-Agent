@@ -1,7 +1,7 @@
 # Distributed Multimodal Video Note-Taking Agent — Implementation Plan
 
-> **Status:** Planning only. No code yet.
-> **Covers:** (Part A) Cloud "Project 2" specification, every requirement, (Part B) reuse of the same system for the **CSE 816 SPE Capstone** (end-to-end DevOps on local Kubernetes).
+> **Status:** Implemented (this document was the original design; the README is the source of truth for running the system).
+> **Covers:** (Part A) Cloud "Project 2" specification, every requirement (Cloud Computing, Project 2).
 > **Date:** 06-Nov-2026
 
 ---
@@ -33,19 +33,6 @@
   - [21. Repository Layout](#21-repository-layout)
   - [22. Build Phases & Milestones](#22-build-phases--milestones)
   - [23. Risks & Mitigations](#23-risks--mitigations)
-- [Part B — Reusing This for the SPE Capstone](#part-b--reusing-this-for-the-spe-capstone)
-  - [24. Can We Use This Project? (Answer)](#24-can-we-use-this-project-answer)
-  - [25. SPE Rubric Mapping](#25-spe-rubric-mapping)
-  - [26. DevOps Pipeline Design](#26-devops-pipeline-design)
-  - [27. Kubernetes Design](#27-kubernetes-design)
-  - [28. IaC / Configuration Management](#28-iac--configuration-management)
-  - [29. Monitoring & Observability (SPE)](#29-monitoring--observability-spe)
-  - [30. Cutting-Edge Extensions](#30-cutting-edge-extensions)
-  - [31. Laptop Resource Budget](#31-laptop-resource-budget)
-  - [32. Team-of-Two Work Split](#32-team-of-two-work-split)
-  - [33. Combined Timeline (Both Courses)](#33-combined-timeline-both-courses)
-  - [34. SPE Deliverables Checklist](#34-spe-deliverables-checklist)
-  - [35. Draft SPE Abstract & Proposal Outline](#35-draft-spe-abstract--proposal-outline)
 - [Appendix](#appendix)
 
 ---
@@ -60,14 +47,14 @@
 | State store | **PostgreSQL 16** | Durable job state, compare-and-set transitions, stage artifacts |
 | Coordination | **Redis 7** | Global token-bucket rate limiters (Lua, atomic), worker heartbeats |
 | Worker topology | **Generic workers with one message per stage** ("stage chaining") | Crash only re-runs the interrupted stage; any worker can do any stage; can still specialise via env |
-| LLM | **Free by default:** Google Gemini API free tier (Flash model) behind a provider adapter. **Ollama** (local, offline) for SPE/laptop demos. **Mock** for CI. Paid providers (Claude/OpenAI) are optional drop-ins | Zero cost; structured JSON output; vision for frame-grounded captions; global limiter keeps us inside free-tier caps |
+| LLM | **Free by default:** Google Gemini API free tier (Flash model) behind a provider adapter. **Ollama** (local, offline) for laptop demos. **Mock** for CI. Paid providers (Claude/OpenAI) are optional drop-ins | Zero cost; structured JSON output; vision for frame-grounded captions; global limiter keeps us inside free-tier caps |
 | Transcript | `youtube-transcript-api` → fallback `yt-dlp` subtitles → optional `faster-whisper` | Robust across caption-less videos |
 | Metadata/duration | `yt-dlp --dump-json` (no download) | True duration, title, availability |
 | Frames | `yt-dlp -g` (stream URL) + `ffmpeg -ss T -i URL -frames:v 1` | Real frame captured directly from the stream, no full download |
 | Notion | Notion REST API + **File Upload API** (`/v1/file_uploads`) | Images uploaded straight to Notion; no public image host needed |
 | Extension | Chrome MV3, **vanilla JS, no build step** | Satisfies "loadable unpacked, no build" |
 | Retry/backoff | TTL "delay queues" 10s → 30s → 90s (demo profile 2s → 4s → 8s) | Native RabbitMQ, no plugin |
-| Deploy | `docker-compose.yml` (Cloud) **and** Helm chart on kind/K3s (SPE) | Same images, two targets |
+| Deploy | `docker-compose.yml` | One command brings up gateway, broker, state stores and ≥ 2 workers |
 
 ---
 
@@ -208,11 +195,11 @@ Each becomes a short ADR in `docs/decisions/` so we can justify it in the viva/d
 ### ADR-5 Worker topology: generic workers, one message per stage
 - Each stage is its own message. A worker finishes a stage, **persists its output durably**, publishes the next-stage message (publisher-confirmed), and **only then acks** the current message.
 - Why: a crash during EXTRACTING_FRAMES re-runs only frame extraction, not the transcript or LLM work (which saves money and tokens). It also directly satisfies "ack only after a stage's work is durably complete".
-- Every worker subscribes to all four stage queues by default (`WORKER_STAGES=all`), so 2 workers cover everything. Setting `WORKER_STAGES=frames` creates a specialised pool **without code changes**. That matters for SPE/KEDA per-queue autoscaling.
+- Every worker subscribes to all four stage queues by default (`WORKER_STAGES=all`), so 2 workers cover everything. Setting `WORKER_STAGES=frames` creates a specialised pool **without code changes**. That allows per-stage scaling.
 - Alternative considered: one message per job with in-process checkpointing. It's simpler, but a crash makes the whole job wait for redelivery, and you can't scale per stage.
 
 ### ADR-6 LLM provider/model: free by default, paid is optional
-**No paid LLM API is required.** The spec leaves the provider open, and SPE prefers no paid cloud. All providers sit behind one adapter interface:
+**No paid LLM API is required.** The spec leaves the provider open. All providers sit behind one adapter interface:
 ```python
 class LLMClient(Protocol):
     async def synthesize(self, chunk: TranscriptChunk, ctx: ChunkContext) -> ChunkSynthesis: ...
@@ -223,8 +210,8 @@ class LLMClient(Protocol):
 
 | `LLM_PROVIDER` | Cost | Vision | Structured output mechanism | Role in this project |
 |---|---|---|---|---|
-| `gemini` (**default**) | Free tier (API key from Google AI Studio) | Yes | `response_mime_type=application/json` + `response_schema` | Default for the Cloud project and SPE "online" demo |
-| `ollama` | Free, local, offline | Yes, with a vision model (e.g. `gemma3`, `qwen2.5vl`, `llama3.2-vision`) | `format: <JSON schema>` | SPE laptop-only demo; fallback if a free-tier daily cap runs out |
+| `gemini` (**default**) | Free tier (API key from Google AI Studio) | Yes | `response_mime_type=application/json` + `response_schema` | Default for the project |
+| `ollama` | Free, local, offline | Yes, with a vision model (e.g. `gemma3`, `qwen2.5vl`, `llama3.2-vision`) | `format: <JSON schema>` | Offline laptop demo; fallback if a free-tier daily cap runs out |
 | `openai_compat` | Free tiers exist (Groq, OpenRouter `:free` models, GitHub Models, Mistral, Cerebras) | Model-dependent | `response_format: json_schema` / JSON mode | Backup provider; one adapter covers all OpenAI-compatible endpoints via `LLM_BASE_URL` |
 | `anthropic` / `openai` | Paid (optional) | Yes | Forced tool call / `json_schema` | Optional quality upgrade only |
 | `mock` | Free | Fake | Canned deterministic JSON | CI, unit/integration tests, rehearsals |
@@ -1051,7 +1038,7 @@ volumes: { rabbitmq-data: {}, pg-data: {} }
 
 ## 16. Observability
 
-(Required lightly for Cloud. It's the centrepiece for SPE, §29.)
+(Required lightly by the spec; useful for showing burst/429/crash behaviour live.)
 - **Logs:** structlog JSON, always with `job_id`, `stage`, `worker_id`, `attempt`, `trace_id`. Tokens/keys redacted by a processor.
 - **Metrics (Prometheus):**
   - `jobs_submitted_total`, `jobs_terminal_total{status}`
@@ -1073,7 +1060,7 @@ volumes: { rabbitmq-data: {}, pg-data: {} }
 - **CORS** locked to the extension origin. Optional `X-Client-Key` shared header.
 - **Input validation** strict (URL allow-list). We never pass user strings to a shell. ffmpeg/yt-dlp are invoked with argument arrays and the validated video ID only.
 - **Rate limit on POST /jobs** per client IP (e.g. 30/min) to protect the queue.
-- Containers non-root, read-only root FS where possible, pinned image tags. (For SPE: Trivy, SBOM, cosign; §30.)
+- Containers non-root, read-only root FS where possible, pinned image tags.
 - Prompt-injection hardening: the transcript is treated as data inside delimiters. The output is schema-validated. The LLM has no tools besides the output schema.
 
 ---
@@ -1157,8 +1144,6 @@ Option to save time: begin Notion uploads during the frames stage. We won't do t
 ├── tests/{unit,contract,integration,chaos,e2e,eval}/
 ├── scripts/{demo.sh, burst.py, kill_worker.sh, judge.py}
 ├── observability/{prometheus.yml, alerts.yml, grafana/dashboards/*.json}
-├── deploy/                      # (SPE) helm/, argocd/, ansible/, keda/, chaos/
-├── .github/workflows/           # (SPE) ci.yml, cd.yml, security.yml
 └── docs/{architecture.md, decisions/ADR-*.md, demo-script.md}
 ```
 
@@ -1166,7 +1151,7 @@ Option to save time: begin Notion uploads during the frames stage. We won't do t
 
 ## 22. Build Phases & Milestones
 
-Each phase ends in something demonstrable. (Dates are in §33.)
+Each phase ends in something demonstrable.
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
@@ -1199,236 +1184,6 @@ Each phase ends in something demonstrable. (Dates are in §33.)
 | Duplicate Notion page on crash | Correctness hit in grading | §11.4 protocol + crash-at-every-point tests |
 | Demo timing (backoffs too slow) | Grader impatience | `RETRY_PROFILE=demo`, runtime fault toggles, `frame_stage_delay_sec` |
 | Heartbeat starvation causing spurious redelivery | Duplicate work | Blocking work off the event loop; idempotent stages anyway |
-
----
-
-# Part B — Reusing This for the SPE Capstone
-
-## 24. Can We Use This Project? (Answer)
-
-**Yes, technically it's a very strong fit. Check two policy points first.**
-
-### Why it fits
-- The SPE brief says: *"We assess DevOps engineering, not application complexity."* That cuts both ways. The Note-Taking Agent already **is** a real multi-service distributed app (gateway, workers, broker, DB, cache), which is exactly what makes Kubernetes, autoscaling, observability, and chaos engineering *meaningful* rather than toy-like. Since the app gets built anyway for the Cloud course, nearly all of the SPE effort can go into the pipeline, which is what's graded.
-- It lines up with the brief's own example topics:
-  - **#25 Voice-to-Text Transcription:** "fed by an asynchronous job queue. Cutting-edge: **KEDA queue-based autoscaling**" (almost identical architecture)
-  - **#23 Summarization Microservice:** "LLM summarizer with **rate limiting** and observability of **token usage and cost**" (we already have both)
-  - **#26 AI Agent Orchestration:** "multi-step agent workflow with monitoring of each agent action. Cutting-edge: **OpenTelemetry agent tracing**"
-  - Track **AI / LLMOps** ("LLM-backed app with CI/CD, model/version registry, request tracing").
-- The Cloud project's grader scenarios (kill a worker, scale workers, burst load) translate directly into SPE cutting-edge items: **Chaos Mesh pod-kill**, **KEDA autoscaling**, and **SLO dashboards**.
-
-### ⚠️ Things to check or adapt before committing
-1. **Academic-integrity / dual-submission policy.** Some institutes treat submitting the same work for two courses as self-plagiarism unless both instructors approve. **Ask Prof. Thangaraju (SPE) and the Cloud course instructor** whether one codebase can serve both courses, with each course graded on its own layer: the Cloud course on the distributed app, SPE on the DevOps pipeline. Mention it explicitly in the SPE proposal (due ~11-Nov). Being transparent turns a risk into a non-issue.
-2. **Team of exactly two.** SPE requires two members, both with visible Git contributions to *code and DevOps*, plus individual vivas. If the Cloud project is individual or has a different team, the SPE partner must genuinely own parts of it (see §32 split) and both must be able to explain everything.
-3. **"Runs on a laptop, free-tier cloud optional."** Our app calls three external services (YouTube, an LLM API, Notion). All three can be **free**: YouTube and Notion cost nothing, and the LLM defaults to the **Gemini free tier** (ADR-6). No paid API is needed anywhere. To also meet "the free-tier service must be optional":
-   - **Ollama in-cluster** (`LLM_PROVIDER=ollama`; a Deployment + PVC for model weights, in the Helm chart behind `ollama.enabled=true`). A small instruct model plus a small vision model (or `VISION_VERIFY=false`) means the **entire demo runs offline on a laptop**.
-   - `LLM_PROVIDER=mock` in CI (no keys, deterministic, no quota used).
-   - Gemini free tier is the optional "better quality" mode. Switching between them is a Helm value / `.env` change.
-   - Total LLM cost for both courses: **₹0**.
-4. **Kubernetes, not Compose.** The Cloud project requires `docker-compose.yml`. SPE requires a local K8s cluster (kind/Minikube/K3s). We keep **both**, built from the same images: Compose for the Cloud grader, Helm on kind for SPE.
-5. **Scope discipline.** SPE demo is 07–12 Dec, so the app must be feature-complete by ~25 Nov to leave time for the pipeline. The Cloud deadline (fill in: ________) should drive app priorities.
-
-### Bottom line
-Use **one monorepo**: the application code (Part A) and the DevOps layer (`.github/workflows`, `deploy/helm`, `deploy/argocd`, `deploy/ansible`, `deploy/keda`, `deploy/chaos`, `observability/`). After policy approval, the Cloud project is graded on `src/`, `extension/`, and `docker-compose.yml`. SPE is graded on the automated path from `git push` → build → test → scan → image → GitOps deploy → observable on a local cluster.
-
----
-
-## 25. SPE Rubric Mapping
-
-| SPE Criterion (marks) | What we deliver | Evidence in demo/viva |
-|---|---|---|
-| Proposal & architecture (3) | 1-page proposal (§35), architecture diagram (app + platform), ADRs | Proposal PDF; `docs/architecture.md` |
-| VCS & collaboration (2) | GitHub, protected `main`, PRs with required review **from the other member**, Conventional Commits, CODEOWNERS, issues/project board, progressive commits from both | GitHub Insights → contributors graph; PR history |
-| CI/CD (4) | GitHub Actions: lint → unit → integration (service containers) → build → scan → push to GHCR → bump GitOps manifest → **Argo CD auto-sync** to kind | Live: push a change → it's deployed and visible within minutes |
-| Containers & K8s (5) | Multi-stage non-root images; Helm chart: Deployments, StatefulSets, Services, Ingress, ConfigMaps, Secrets, probes, resources, HPA (gateway), **KEDA** (workers), PDBs, NetworkPolicies | `kubectl get all`, scale under load, self-healing |
-| Config mgmt / IaC (2) | **Ansible** playbook bootstraps a laptop: installs kind/kubectl/helm, creates the cluster (config-as-code), installs ingress, Argo CD, KEDA, monitoring, Chaos Mesh. **Helm** for app config; Argo CD `Application` manifests | `ansible-playbook site.yml` → whole platform up from zero |
-| Monitoring & observability (3) | kube-prometheus-stack (Prometheus, Grafana, Alertmanager), Loki (logs), Tempo (traces), custom app metrics + RabbitMQ metrics, dashboards-as-code, alert rules, SLOs | Grafana dashboards live during the demo; one trace across gateway → worker → LLM |
-| Cutting-edge extension (4) | **Primary:** KEDA queue-driven autoscaling + Chaos Mesh fault experiments + OpenTelemetry LLM tracing. **Optional:** Argo Rollouts canary, Trivy/SBOM/Cosign supply chain | Burst → pods scale 1→N→1; chaos pod-kill → no lost jobs; trace view |
-| Report, demo, viva (2) | 4–6 page report, live demo, backup recording, contribution statement | |
-
----
-
-## 26. DevOps Pipeline Design
-
-### 26.1 Source control & collaboration
-- GitHub repo, `main` protected: PR required, 1 approval (the other teammate), status checks required, linear history.
-- Branches: `feat/*`, `fix/*`, `ci/*`, `infra/*`. Conventional Commits (`feat(worker): …`), enforced by a commitlint action.
-- CODEOWNERS split by area (§32) so reviews naturally cross between members.
-- GitHub Projects board with issues per phase. Each PR links an issue.
-- Pre-commit hooks: ruff, ruff-format, mypy (light), yamllint, hadolint, `helm lint`, detect-secrets.
-
-### 26.2 CI (GitHub Actions) — `.github/workflows/ci.yml`
-Trigger: PR and push to `main`.
-
-```
-jobs:
-  lint:        ruff, mypy, yamllint, hadolint, helm lint, kubeconform (render chart → validate), eslint (extension)
-  unit:        pytest -m unit --cov (coverage gate ≥ 70%), upload coverage
-  integration: services: postgres, rabbitmq, redis (GH service containers); LLM_PROVIDER=mock; Notion/YouTube stubs
-  extension:   web-ext lint / manifest validation; zip artifact
-  build:       (needs above) docker buildx → images gateway & worker, tags: sha-<short>, branch; cache-to GHA
-  scan:        Trivy image scan (fail on CRITICAL), Trivy fs/config (IaC misconfig), Syft SBOM (SPDX) upload as artifact
-  push:        (main only) push to ghcr.io/<org>/video-notes-{gateway,worker}:sha-<short>
-  sign:        (main only) cosign sign --keyless (GitHub OIDC) + attest SBOM   [cutting-edge, optional]
-  e2e-kind:    (main only, optional) spin up kind in the runner (helm/kind-action), helm install with mock LLM, run smoke test (submit job → COMPLETED against Notion stub)
-```
-
-### 26.3 CD: GitOps with Argo CD (pull-based, which suits a laptop cluster)
-GitHub can't reach a laptop cluster to push to it, so Argo CD **inside the cluster pulls** from Git. That's why GitOps fits here.
-- `cd.yml` (on main after push + sign): update `deploy/helm/video-notes/values-local.yaml` → `image.tag: sha-<short>` (via `yq`), then commit with `[skip ci]` as a bot (or open an auto-merged PR). Alternative: **Argo CD Image Updater** watching GHCR, so no commit-back is needed.
-- Argo CD `Application` `video-notes` → path `deploy/helm/video-notes`, `syncPolicy: automated {prune: true, selfHeal: true}`, poll interval 1 min (or a webhook via smee/ngrok, optional).
-- The flow: **push → CI (build/test/scan) → image in GHCR → tag bump in Git → Argo CD sync → new pods roll out → Grafana shows the new `version` label**, fully automated, as required by the brief.
-- Jenkins alternative (course default): a `Jenkinsfile` with the same stages running in-cluster (Jenkins Helm chart) for teams who prefer it. We pick GitHub Actions + Argo CD and justify that choice in the report.
-
-### 26.4 Environments
-- `local` (kind on the laptop) is the graded environment. Optional: `staging` namespace in the same cluster, deployed first by an Argo CD ApplicationSet, then promoted.
-
----
-
-## 27. Kubernetes Design
-
-### 27.1 Cluster
-`kind` config-as-code (`deploy/kind/cluster.yaml`): 1 control-plane + 2 worker nodes (so pod-kill and node-drain demos are meaningful), port-mappings 80/443 for ingress-nginx. K3s is an alternative for lower RAM.
-
-### 27.2 Helm chart `deploy/helm/video-notes`
-| Resource | Details |
-|---|---|
-| `Deployment gateway` | 2 replicas, readiness `/healthz`, liveness `/livez`, requests 100m/128Mi, limits 500m/256Mi, HPA on CPU (2→5) |
-| `Deployment worker` | Managed by **KEDA ScaledObject** (min 1/2, max 6) on RabbitMQ queue length; `terminationGracePeriodSeconds: 60` (graceful SIGTERM → finish stage); requests 250m/256Mi, limits 1 CPU/1Gi (ffmpeg); liveness via a heartbeat file or `/healthz` on the metrics port |
-| `Job migrate` | Helm pre-install/upgrade hook running Alembic |
-| RabbitMQ | Bitnami chart / RabbitMQ Cluster Operator (1 replica locally, quorum queues), PVC, Prometheus plugin |
-| PostgreSQL | Bitnami chart or CloudNativePG (1 instance), PVC |
-| Redis | Bitnami chart, AOF on |
-| Ollama (optional, `ollama.enabled`) | `Deployment` + `Service ollama:11434` + PVC (~5–10 Gi) for model weights; init Job runs `ollama pull <model>`; requests 2 CPU/4–6Gi; workers point `LLM_BASE_URL` at it. This is the laptop-only, no-cloud LLM for the SPE demo |
-| `Ingress` | `notes.localtest.me` → gateway (extension `GATEWAY_BASE_URL` configurable). `localtest.me` resolves to 127.0.0.1 |
-| `ConfigMap` | Non-secret env (§14) |
-| `Secret` | LLM key, Notion OAuth creds, `MESSAGE_ENC_KEY`, `ADMIN_TOKEN`, created via **Sealed Secrets** (encrypted in Git) or SOPS, or **Vault** as a stretch goal |
-| `PodDisruptionBudget` | gateway minAvailable 1, worker minAvailable 1 |
-| `NetworkPolicy` | Only gateway/workers may reach postgres/redis/rabbitmq; egress for workers to the internet (YouTube/LLM/Notion) |
-| `ServiceMonitor` | gateway, worker, rabbitmq scraped by Prometheus |
-| `PrometheusRule` | Alerts: DLQ > 0, job failure rate > 20 %, `external_429_total{api="llm"}` increase, no workers alive, queue depth > 20 for 5 min |
-
-### 27.3 Mapping the Cloud graders' scenarios to K8s
-- Worker crash → `kubectl delete pod --grace-period=0 --force <worker>` or a **Chaos Mesh PodChaos** experiment. The broker redelivers and the Deployment/KEDA recreates the pod.
-- Scaling → KEDA automatically, or `kubectl scale`.
-- Health → readiness gates, `/healthz` via the ingress.
-
----
-
-## 28. IaC / Configuration Management
-
-- **Ansible** (course default) `deploy/ansible/site.yml`, idempotent roles:
-  - `prereqs`: docker, kind, kubectl, helm, (argocd CLI) on Ubuntu/macOS/WSL2
-  - `cluster`: `kind create cluster --config …` (skipped if it exists)
-  - `platform`: helm installs ingress-nginx, Argo CD, KEDA, kube-prometheus-stack, Loki, Tempo, Chaos Mesh, Sealed Secrets (versions pinned in `group_vars`)
-  - `app`: apply Argo CD `Application`s (app-of-apps), which pull everything else from Git
-  - `secrets`: generate/seal secrets from a local vault file (`ansible-vault`)
-- **Helm** values per environment hold the app configuration.
-- Optional: **Terraform** with `tehcyx/kind` + `helm` providers as an alternative; mention the trade-off in the report.
-- Result: `make platform` (= `ansible-playbook -i inventory/local.ini site.yml`) takes a fresh laptop to the full platform plus the app, which is a reproducible viva demo.
-
----
-
-## 29. Monitoring & Observability (SPE)
-
-- **Metrics:** kube-prometheus-stack + app metrics (§16) + RabbitMQ plugin + KEDA metrics.
-- **Logs:** Loki + Promtail/Alloy. Grafana Explore by `job_id` shows every log line of one job across pods.
-- **Traces:** OpenTelemetry SDK in gateway and worker → OTel Collector → **Tempo**. Trace context travels **through RabbitMQ headers**, so one trace spans `POST /jobs` → transcribe (pod A) → summarize (pod B, with LLM spans: model, tokens, latency) → frames → publish (Notion spans). Exemplars link the metrics histograms to traces.
-- **Dashboards as code** (`observability/grafana/dashboards/*.json`, loaded via ConfigMap sidecar):
-  1. *Pipeline overview*: jobs/min by status, success rate, e2e p50/p95, per-stage latency heatmap
-  2. *Queue & scaling*: queue depth per stage, unacked, consumers, **KEDA replica count overlaid on queue depth**
-  3. *External APIs & LLMOps*: requests/429s by API, limiter wait, tokens/min vs configured limit, estimated cost/job
-  4. *Reliability*: retries by reason, DLQ size, redeliveries, chaos experiment annotations
-  5. *Platform*: node/pod CPU/mem (stock dashboards)
-- **SLOs:** 95 % of ≤ 20-min jobs complete within 3 min; 99 % of jobs never lost (DLQ or terminal). Burn-rate alerts via PrometheusRule (Sloth/Pyrra, optional).
-- Demo moment: push a deliberately slower build. The Grafana `version` panel switches and the latency panel moves. (With Argo Rollouts, an analysis rolls it back automatically; see §30.)
-
----
-
-## 30. Cutting-Edge Extensions
-
-The brief requires ≥ 1. We plan **3 core + 2 optional**, each tied to something real in the app rather than bolted on:
-
-| # | Extension | Why it's natural here | Demo |
-|---|---|---|---|
-| ★1 | **KEDA event-driven autoscaling** (`ScaledObject` on RabbitMQ `stage.*` queue lengths; optionally per-stage pools via `WORKER_STAGES`) | Queue-backed worker pool is the core of the app; brief topic #25 names exactly this | Burst 10 jobs → workers 1 → 6 → back to 1; Grafana overlay. The global Redis limiter keeps LLM 429s at 0 even at 6 pods, which is a nice story ("autoscale compute, not API quota") |
-| ★2 | **Chaos engineering with Chaos Mesh** (PodChaos kill worker mid-stage, NetworkChaos delay to RabbitMQ, StressChaos on worker) | The Cloud grader literally kills workers; we make it repeatable, scheduled, and observable | Run `chaos/worker-pod-kill.yaml` while jobs flow → zero lost jobs, one Notion page per job, recovery time on dashboard |
-| ★3 | **OpenTelemetry end-to-end + LLM (GenAI) tracing** to Tempo, logs to Loki | Async multi-hop pipeline is a perfect showcase for context propagation through a broker; LLMOps token/cost observability | Click a job → full trace across pods incl. LLM calls with token counts |
-| ☆4 | **Argo Rollouts canary** for the worker (or gateway) with Prometheus `AnalysisTemplate` (job failure rate, stage latency) | Prompt/model changes are risky, and a canary release of a new prompt version = LLMOps "prompt versioning + safe rollout" (topic #20) | Push a "bad prompt" version → analysis fails → automatic rollback |
-| ☆5 | **DevSecOps supply chain**: Trivy gates, Syft SBOM, Cosign keyless signing, **Kyverno** policy verifying signatures + non-root at admission | Cheap to add in CI; strong report material | Unsigned image is rejected by the cluster |
-
-If time is short: ★1 + ★3 are enough for full innovation marks. ★2 is low effort once the app is idempotent (it already is).
-
----
-
-## 31. Laptop Resource Budget
-
-| Component | Approx. RAM |
-|---|---|
-| kind nodes overhead (3 nodes) | 1.5 GB |
-| App: gateway ×2, worker ×2 (idle) | 0.8 GB (workers spike ~300 MB each during ffmpeg) |
-| RabbitMQ, Postgres, Redis | 0.8 GB |
-| Argo CD | 0.6 GB |
-| kube-prometheus-stack | 1.2 GB |
-| Loki + Tempo + OTel collector | 0.8 GB |
-| KEDA, Chaos Mesh, ingress | 0.5 GB |
-| **Total** | **~6.5–7 GB** (+ Ollama model 2–5 GB if running a local LLM) |
-
-**Minimum spec (documented in report):** 4 CPU cores, 16 GB RAM, 25 GB free disk; Docker Desktop/WSL2 or native Linux. A "lite" Ansible profile (no Loki/Tempo, 1 kind node) fits 8 GB.
-
----
-
-## 32. Team-of-Two Work Split
-
-Both members touch **both code and DevOps** (required). Example split. Swap freely, but keep it balanced in Git history.
-
-| Area | Member A | Member B |
-|---|---|---|
-| App | Gateway, state machine, DB/migrations, broker topology, retry/DLQ, idempotent publish | Worker stages (transcript, LLM chunk/merge, frames, Notion), rate limiter, browser extension |
-| DevOps | CI workflows (lint/test/build/scan), Helm chart, Argo CD GitOps, Argo Rollouts | Ansible bootstrap, observability stack + dashboards + alerts, KEDA, Chaos Mesh |
-| Docs | Report: architecture, CI/CD, K8s | Report: IaC, observability, cutting-edge, challenges |
-| Cross-review | Reviews B's PRs | Reviews A's PRs |
-
-Practices: small PRs, at least one meaningful commit per person every couple of days, a pair-programming session per week (both understand everything for the viva), and a signed contribution statement listing PRs per person.
-
----
-
-## 33. Combined Timeline (Both Courses)
-
-Today = **Fri 06-Nov-2026**. SPE milestones from the brief; Cloud deadline TBD (adjust).
-
-| Week | Dates | Cloud app (Part A) | SPE DevOps (Part B) |
-|---|---|---|---|
-| W1 | 06–12 Nov | P0–P2: skeleton, gateway, state machine, worker spine with stub stages, retry/DLQ | Repo + branch protection + CODEOWNERS; CI lint/unit/build; **proposal submitted ~11-Nov** (confirm dual-use with instructors) |
-| W2 | 13–19 Nov | P3: real transcript/LLM/frames/Notion; P5 extension in parallel | Dockerfiles hardened; kind config; Helm chart v1; Ansible bootstrap v1; images to GHCR |
-| W3 | 20–26 Nov | P4 rate limiting + fault injection; P6 hardening (crash-at-every-point) | Argo CD GitOps, push→deploy automated. **Milestone "pipeline working" ~25-Nov** ✅ |
-| W4 | 27 Nov–03 Dec | P7 README, eval report, Cloud demo rehearsal (submit if due) | kube-prometheus-stack, Loki, Tempo, OTel, dashboards, alerts. **"Deployed + observable" ~02-Dec** ✅ KEDA |
-| W5 | 04–10 Dec | Bug fixes only | Chaos Mesh, (Argo Rollouts / supply chain if time), report 4–6 pages, backup screen recording, contribution statement, viva prep. **Final demo 07–12 Dec** |
-
-Critical path: worker spine (W1) → real stages (W2) → images on GHCR (W2) → GitOps (W3). Start the Helm chart against stub images in W2 so DevOps work doesn't wait on app features.
-
----
-
-## 34. SPE Deliverables Checklist
-
-- [ ] Topic + abstract registered on the shared sheet (kickoff)
-- [ ] 1-page proposal (~11-Nov): app, architecture diagram, tools per stage, chosen extension(s), dual-use note
-- [ ] Git repo: source, pipeline definitions, IaC (Ansible), Helm/K8s manifests, Argo CD apps, dashboards, chaos experiments
-- [ ] Automated flow: single push → build → test → image → deploy to local cluster → observable
-- [ ] Final report (4–6 pages PDF): architecture diagram, tool choices + rationale, cutting-edge extension, challenges, min laptop specs
-- [ ] Live demo script (push a visible change, e.g. a popup version label or a Notion page footer version; watch it flow; show dashboards; chaos kill; KEDA scale)
-- [ ] Screen-recorded backup of the full pipeline run
-- [ ] Individual contribution statement signed by both
-- [ ] Both members rehearsed for individual viva (each can explain every stage)
-
----
-
-## 35. Draft SPE Abstract & Proposal Outline
-
-**Abstract (for the registration sheet):**
-> *Video Notes Agent: an LLMOps platform on local Kubernetes.* We build a distributed, queue-driven application. A Chrome extension submits YouTube videos. Stateless workers transcribe them, summarise with an LLM, capture real video frames of key slides, and publish structured study notes to Notion. Around it we engineer a fully automated DevOps lifecycle: GitHub-based collaboration, GitHub Actions CI (tests, image builds, Trivy scanning, SBOM), GitOps continuous delivery with Argo CD onto a kind cluster provisioned by Ansible and Helm, and observability with Prometheus, Grafana, Loki and OpenTelemetry/Tempo, including LLM token and cost tracing. The cutting-edge extensions are KEDA event-driven autoscaling of workers on RabbitMQ queue depth and Chaos Mesh experiments that prove no job is lost when worker pods are killed mid-task. Everything runs on a laptop at zero cost: the LLM is the Gemini free tier, or a local Ollama model served inside the cluster for a fully offline demo.
-
-**Proposal outline (1 page):** Problem & app (3 lines) · Architecture diagram (app + platform) · Tool per DevOps stage (table from §25) · Cutting-edge: KEDA + Chaos Mesh + OTel (and why) · Laptop constraints & local LLM fallback · Milestone plan (§33) · Team split (§32) · Note on shared codebase with the Cloud course (approved by …).
 
 ---
 
@@ -1481,8 +1236,6 @@ Previous section heading: {prev_heading}
 ```
 
 ### D. Open questions to settle early
-1. Cloud project deadline and team composition. Does it match the SPE team?
-2. Instructor approval for shared codebase across both courses.
-3. Current Gemini free-tier limits for the chosen Flash model (set `LLM_RPM`/`LLM_TPM`/`LLM_RPD` at ~80 %), and which Ollama models fit our laptops' RAM for the offline/SPE demo (benchmark a 4B vs 7–8B model on a 20-min transcript).
-4. Notion: public OAuth integration (needs a redirect URI and a stable extension ID key) vs internal-token fallback for graders.
-5. Whether graders run the extension against `localhost:8080` (Compose) or the kind ingress, so both should be supported via the options page.
+1. Cloud project deadline and team composition.
+2. Current Gemini free-tier limits for the chosen Flash model (set `LLM_RPM`/`LLM_TPM`/`LLM_RPD` at ~80 %), and which Ollama models fit our laptops' RAM for an offline demo.
+3. Notion: public OAuth integration (needs a redirect URI and a stable extension ID key) vs internal-token fallback for graders.

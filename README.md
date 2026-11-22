@@ -59,7 +59,9 @@ Everything runs in Docker, and every image is multi-arch, so the steps are the s
 ### 2.1 LLM (free: Gemini API free tier)
 1. <https://aistudio.google.com> → **Get API key** → create a key.
 2. In `.env`: `LLM_PROVIDER=gemini`, `LLM_API_KEY=<key>`, `LLM_MODEL=<a current Flash model id>`.
-3. Set `LLM_RPM`, `LLM_TPM`, `LLM_RPD` to about 80 % of that model's free-tier limits (shown in AI Studio).
+3. Set `LLM_RPM`, `LLM_TPM`, `LLM_RPD` to about 80 % of that model's free-tier limits (AI Studio → *Rate Limit*).
+   The defaults (`12` / `200000` / `400`) are 80 % of the Gemini 3.1 Flash Lite free tier (15 RPM, 250K TPM, 500 RPD).
+   `LLM_FALLBACK_MODEL=gemini-3.5-flash-lite` is used only when the primary model is overloaded or its daily quota is used up.
    All workers share these limits, so a burst of jobs queues up instead of causing provider 429s.
 
 No paid API is needed. Alternatives: `LLM_PROVIDER=ollama` (local and offline, see §6),
@@ -149,7 +151,7 @@ Everything is documented inline in [.env.example](.env.example). The important o
 |---|---|---|
 | `PIPELINE_MODE` | `stub` | `stub` (no keys) or `real` |
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | `gemini` / – / – | **LLM provider, API key, model name** |
-| `LLM_RPM` / `LLM_TPM` / `LLM_RPD` | `8` / `200000` / `200` | **Configured LLM rate limit**, global across workers (per min / tokens per min / per day) |
+| `LLM_RPM` / `LLM_TPM` / `LLM_RPD` | `12` / `200000` / `400` | **Configured LLM rate limit**, global across workers (per min / tokens per min / per day) |
 | `LLM_MAX_CONCURRENCY` | `2` | Max in-flight LLM calls cluster-wide |
 | `LLM_BASE_URL`, `LLM_FALLBACK_PROVIDER` | – | For ollama/openai_compat; fallback when the daily quota runs out |
 | `VISION_VERIFY` / `VISION_BATCH_SIZE` | `true` / `8` | Ground frame captions with one batched vision call per job |

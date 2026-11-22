@@ -39,9 +39,9 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_fallback_provider: str = ""
     llm_fallback_model: str = ""
-    llm_rpm: int = 8
+    llm_rpm: int = 12  # 80% of Gemini 3.1 Flash Lite free tier (15 RPM / 250K TPM / 500 RPD)
     llm_tpm: int = 200_000
-    llm_rpd: int = 200
+    llm_rpd: int = 400
     llm_max_concurrency: int = 2
     llm_thinking_level: str = ""  # Gemini: "", "minimal", "low", "medium", "high" ("" = model default)
     llm_timeout_sec: float = 120

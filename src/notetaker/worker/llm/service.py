@@ -30,6 +30,18 @@ T = TypeVar("T", bound=BaseModel)
 
 # Provider failures where trying the fallback model makes sense (overload, timeouts, empty answers).
 FALLBACK_CODES = {"LLM_UNAVAILABLE", "LLM_TIMEOUT", "LLM_UNREACHABLE", "LLM_EMPTY"}
+# The provider is overloaded (HTTP 5xx "high demand") or too slow to answer. Like a 429 this means
+# "try again later", so once no fallback is left it is reported as busy, not as a job failure.
+OVERLOAD_CODES = {"LLM_UNAVAILABLE", "LLM_TIMEOUT"}
+
+
+def as_busy(exc: Exception) -> Exception:
+    """Turn a provider overload into a rate-limit wait: the job shows as waiting and retries on the
+    rate-limit budget instead of using up its failure budget (a Gemini 503 can last minutes)."""
+    if isinstance(exc, TransientError) and exc.code in OVERLOAD_CODES:
+        return RateLimited("llm", retry_after=None, code="LLM_OVERLOADED",
+                           message=f"The AI model is overloaded ({exc.message}); waiting before retrying.")
+    return exc
 
 
 def _extract_json(text: str) -> str:
@@ -64,13 +76,22 @@ class LLMService:
                 text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est, vision)
             except (RateLimited, TransientError) as exc:
                 if not self._should_fall_back(exc) or provider is self.fallback:
-                    raise
+                    busy = as_busy(exc)
+                    if busy is exc:
+                        raise
+                    raise busy from exc
                 log.warning("llm_fallback", reason=exc.code, primary=getattr(provider, "model", provider.name),
                             fallback=getattr(self.fallback, "model", self.fallback.name))
                 metrics.LLM_FALLBACKS.labels(exc.code).inc()
                 provider = self.fallback
-                text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est, vision,
-                                                  limit=exc.code != "LLM_DAILY_QUOTA")
+                try:
+                    text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est,
+                                                      vision, limit=exc.code != "LLM_DAILY_QUOTA")
+                except TransientError as exc2:
+                    busy = as_busy(exc2)
+                    if busy is exc2:
+                        raise
+                    raise busy from exc2
             try:
                 return model_cls.model_validate(json.loads(_extract_json(text)))
             except (ValueError, ValidationError) as exc:

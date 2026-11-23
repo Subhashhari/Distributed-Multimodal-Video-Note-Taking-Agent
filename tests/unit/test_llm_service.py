@@ -73,7 +73,23 @@ async def test_request_errors_do_not_fall_back(settings, redis):
 
 async def test_no_fallback_configured_reraises(settings, redis):
     with pytest.raises(TransientError):
-        await call(service(settings, redis, Scripted("primary", TransientError("x", code="LLM_UNAVAILABLE"))))
+        await call(service(settings, redis, Scripted("primary", TransientError("x", code="LLM_UNREACHABLE"))))
+
+
+@pytest.mark.parametrize("code", ["LLM_UNAVAILABLE", "LLM_TIMEOUT"])
+async def test_overload_without_fallback_is_busy_not_failure(settings, redis, code):
+    """A Gemini 503 'high demand' waits on the rate-limit budget instead of burning the job's attempts."""
+    with pytest.raises(RateLimited) as exc:
+        await call(service(settings, redis, Scripted("primary", TransientError("503", code=code))))
+    assert exc.value.code == "LLM_OVERLOADED" and exc.value.api == "llm" and not exc.value.self_throttled
+
+
+async def test_overload_on_primary_and_fallback_is_busy(settings, redis):
+    primary = Scripted("primary", TransientError("503", code="LLM_UNAVAILABLE"))
+    fallback = Scripted("fallback", TransientError("503", code="LLM_UNAVAILABLE"))
+    with pytest.raises(RateLimited) as exc:
+        await call(service(settings, redis, primary, fallback))
+    assert exc.value.code == "LLM_OVERLOADED" and primary.calls == 1 and fallback.calls == 1
 
 
 async def test_invalid_json_gets_one_repair_then_fails(settings, redis):

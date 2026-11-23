@@ -3,6 +3,7 @@
   gemini         Google Gemini API (free tier)   responseSchema JSON mode, inline images
   ollama         local models, offline           format=<JSON schema>, images
   openai_compat  Groq / OpenRouter / GitHub Models / Mistral / OpenAI   response_format json_object
+  anthropic      Claude, via the official anthropic SDK (anthropic_provider.py)
   mock           deterministic, no network (CI / offline demos)
 """
 
@@ -248,4 +249,8 @@ def build_provider(settings: Settings, name: str, model: str) -> Provider:
         return OpenAICompatProvider(settings, model, default_base="https://api.openai.com/v1")
     if name == "mock":
         return MockProvider(settings, model or "mock")
+    if name == "anthropic":
+        from .anthropic_provider import AnthropicProvider  # imported lazily: only the worker image has the SDK
+
+        return AnthropicProvider(settings, model)
     raise FatalError(f"Unknown LLM_PROVIDER {name!r}", code="LLM_NOT_CONFIGURED")

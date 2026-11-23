@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     llm_tpm: int = 200_000
     llm_rpd: int = 400
     llm_max_concurrency: int = 2
+    anthropic_api_key: str = ""  # LLM_PROVIDER=anthropic (Claude); LLM_API_KEY stays free for a Gemini fallback
+    anthropic_refusal_fallback: bool = True  # Claude: server-side fallback model if a request is declined
+    llm_effort: str = "medium"  # Claude: output_config.effort (low | medium | high | xhigh | max; "" = model default)
     llm_thinking_level: str = ""  # Gemini: "", "minimal", "low", "medium", "high" ("" = model default)
     llm_timeout_sec: float = 120
     limiter_max_wait_sec: float = 20

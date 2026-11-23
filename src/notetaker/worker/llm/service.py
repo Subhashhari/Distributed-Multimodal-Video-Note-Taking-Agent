@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import TypeVar
@@ -33,6 +34,9 @@ FALLBACK_CODES = {"LLM_UNAVAILABLE", "LLM_TIMEOUT", "LLM_UNREACHABLE", "LLM_EMPT
 # The provider is overloaded (HTTP 5xx "high demand") or too slow to answer. Like a 429 this means
 # "try again later", so once no fallback is left it is reported as busy, not as a job failure.
 OVERLOAD_CODES = {"LLM_UNAVAILABLE", "LLM_TIMEOUT"}
+# A 503 "high demand" is often intermittent: the same model answers a few seconds later. These are
+# retried in place (LLM_OVERLOAD_RETRIES, a few seconds apart) before falling back or reporting busy.
+QUICK_RETRY_CODES = {"LLM_UNAVAILABLE"}
 
 
 def as_busy(exc: Exception) -> Exception:
@@ -73,7 +77,8 @@ class LLMService:
             prompt = user if attempt == 0 else (
                 f"{user}\n\nYour previous answer was invalid ({last_err}). Return ONLY valid JSON for the schema.")
             try:
-                text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est, vision)
+                text, usage = await self._with_quick_retries(provider, system, prompt, schema, images, max_out,
+                                                             est, vision)
             except (RateLimited, TransientError) as exc:
                 if not self._should_fall_back(exc) or provider is self.fallback:
                     busy = as_busy(exc)
@@ -85,8 +90,9 @@ class LLMService:
                 metrics.LLM_FALLBACKS.labels(exc.code).inc()
                 provider = self.fallback
                 try:
-                    text, usage = await self._limited(provider, system, prompt, schema, images, max_out, est,
-                                                      vision, limit=exc.code != "LLM_DAILY_QUOTA")
+                    text, usage = await self._with_quick_retries(provider, system, prompt, schema, images,
+                                                                 max_out, est, vision,
+                                                                 limit=exc.code != "LLM_DAILY_QUOTA")
                 except TransientError as exc2:
                     busy = as_busy(exc2)
                     if busy is exc2:
@@ -98,6 +104,19 @@ class LLMService:
                 last_err = str(exc)[:300]
                 log.warning("llm_invalid_output", attempt=attempt + 1, error=last_err)
         raise FatalError(f"The AI model returned invalid output twice: {last_err}", code="LLM_INVALID_OUTPUT")
+
+    async def _with_quick_retries(self, provider, *args, **kwargs):
+        retries = max(self.settings.llm_overload_retries, 0)
+        for i in range(retries + 1):
+            try:
+                return await self._limited(provider, *args, **kwargs)
+            except TransientError as exc:
+                if exc.code not in QUICK_RETRY_CODES or i == retries:
+                    raise
+                delay = self.settings.llm_overload_retry_delay_sec * (i + 1)
+                log.info("llm_overloaded_retrying", model=getattr(provider, "model", provider.name),
+                         retry=i + 1, of=retries, delay_sec=delay)
+                await asyncio.sleep(delay)
 
     def _should_fall_back(self, exc: Exception) -> bool:
         """Fall back for a daily-quota stop or an overloaded/unresponsive model, never for a per-minute 429

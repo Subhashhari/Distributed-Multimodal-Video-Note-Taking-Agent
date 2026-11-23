@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     llm_tpm: int = 200_000
     llm_rpd: int = 400
     llm_max_concurrency: int = 2
+    llm_overload_retries: int = 3  # quick in-place retries on an intermittent 503 "high demand"
+    llm_overload_retry_delay_sec: float = 3  # 3 s, 6 s, 9 s between them
     llm_thinking_level: str = ""  # Gemini: "", "minimal", "low", "medium", "high" ("" = model default)
     llm_timeout_sec: float = 120
     limiter_max_wait_sec: float = 20

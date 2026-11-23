@@ -31,8 +31,10 @@ class Scripted:
 GOOD = json.dumps({"tldr": ["ok"]})
 
 
-def service(settings, redis, primary, fallback=None):
+def service(settings, redis, primary, fallback=None, quick_retries=0):
     settings.llm_rpm = settings.llm_tpm = settings.llm_rpd = 0
+    settings.llm_overload_retries = quick_retries
+    settings.llm_overload_retry_delay_sec = 0
     return LLMService(settings, RateLimiter(redis, settings), primary, fallback)
 
 
@@ -46,6 +48,29 @@ async def test_overloaded_primary_falls_back(settings, redis, code):
     fallback = Scripted("fallback", GOOD)
     res = await call(service(settings, redis, primary, fallback))
     assert res.tldr == ["ok"] and primary.calls == 1 and fallback.calls == 1
+
+
+async def test_intermittent_503_is_retried_in_place(settings, redis):
+    """Gemini often answers a 503 'high demand' a few seconds later: retry the same model first."""
+    primary = Scripted("primary", TransientError("503", code="LLM_UNAVAILABLE"),
+                       TransientError("503", code="LLM_UNAVAILABLE"), GOOD)
+    fallback = Scripted("fallback", GOOD)
+    res = await call(service(settings, redis, primary, fallback, quick_retries=3))
+    assert res.tldr == ["ok"] and primary.calls == 3 and fallback.calls == 0
+
+
+async def test_quick_retries_exhausted_then_falls_back(settings, redis):
+    primary = Scripted("primary", *[TransientError("503", code="LLM_UNAVAILABLE")] * 3)
+    fallback = Scripted("fallback", GOOD)
+    res = await call(service(settings, redis, primary, fallback, quick_retries=2))
+    assert res.tldr == ["ok"] and primary.calls == 3 and fallback.calls == 1
+
+
+async def test_timeouts_are_not_retried_in_place(settings, redis):
+    primary = Scripted("primary", TransientError("slow", code="LLM_TIMEOUT"))
+    with pytest.raises(RateLimited):
+        await call(service(settings, redis, primary, quick_retries=3))
+    assert primary.calls == 1
 
 
 async def test_daily_quota_falls_back(settings, redis):

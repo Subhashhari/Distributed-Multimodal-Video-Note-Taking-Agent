@@ -208,7 +208,7 @@ Requires **Python 3.12** (the same version as the Docker images; some worker whe
 python -m venv .venv && .venv/Scripts/activate     # macOS/Linux: source .venv/bin/activate
 pip install -e ".[dev]"
 pytest                       # 90+ tests: unit, API contract, worker integration, real stages with fakes
-node --test tests/extension  # extension status-text tests
+node --test tests/extension/*.test.mjs  # extension status-text tests
 ruff check src tests
 ```
 

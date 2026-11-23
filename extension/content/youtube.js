@@ -2,9 +2,11 @@
 // YouTube is a single-page app, so we re-check on its navigation events and when the player re-renders.
 (() => {
   const BTN_CLASS = "vnt-take-notes";
-  const ICON = `<svg viewBox="0 0 36 36" width="100%" height="100%" aria-hidden="true">
-    <path fill="#fff" d="M11 9h11l5 5v13a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zm10 1.5V15h4.5L21 10.5z
-      M13 18h10v1.6H13zm0 3.4h10V23H13zm0-6.8h6v1.6h-6z"/></svg>`;
+  // A note page with a folded corner and three text lines, centred in a 24x24 box like YouTube's own icons.
+  // evenodd cuts the fold and the lines out of the page instead of drawing a solid white block.
+  const ICON = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path fill="#fff" fill-rule="evenodd" d="M6.5 3h8l4.5 4.5V20a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z
+      M14 4.6V8h3.4zM8 11h8v1.5H8zm0 3.2h8v1.5H8zm0 3.2h5.5v1.5H8z"/></svg>`;
 
   function currentVideoId() {
     if (location.pathname !== "/watch") return null;

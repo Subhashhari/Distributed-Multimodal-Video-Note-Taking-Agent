@@ -1,9 +1,21 @@
+/* Centre the icon in the button whatever the player layout (old inline toolbar or the newer flex one);
+   an inline svg otherwise sits on the text baseline and drops below the neighbouring icons. */
 .vnt-take-notes {
   position: relative;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  vertical-align: top;
+  padding: 0 !important;
   opacity: 0.92;
 }
 .vnt-take-notes:hover { opacity: 1; }
-.vnt-take-notes svg { pointer-events: none; }
+.vnt-take-notes svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
 .vnt-take-notes.vnt-busy { opacity: 0.5; cursor: progress; }
 
 .vnt-toast {

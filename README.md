@@ -64,9 +64,7 @@ Everything runs in Docker, and every image is multi-arch, so the steps are the s
    `LLM_FALLBACK_MODEL=gemini-3.5-flash-lite` is used only when the primary model is overloaded or its daily quota is used up.
    All workers share these limits, so a burst of jobs queues up instead of causing provider 429s.
 
-No paid API is needed. **Claude (paid):** `LLM_PROVIDER=anthropic`, `LLM_MODEL=claude-opus-5-5`,
-`ANTHROPIC_API_KEY=<key>`; keep the Gemini key in `LLM_API_KEY` and set `LLM_FALLBACK_PROVIDER=gemini` to
-fall back to Gemini. Other alternatives: `LLM_PROVIDER=ollama` (local and offline, see §6),
+No paid API is needed. Alternatives: `LLM_PROVIDER=ollama` (local and offline, see §6),
 `openai_compat` (Groq, OpenRouter, GitHub Models and similar, via `LLM_BASE_URL`), or `mock`.
 
 ### 2.2 Notion
@@ -159,7 +157,6 @@ Everything is documented inline in [.env.example](.env.example). The important o
 | `LLM_RPM` / `LLM_TPM` / `LLM_RPD` | `12` / `200000` / `400` | **Configured LLM rate limit**, global across workers (per min / tokens per min / per day) |
 | `LLM_MAX_CONCURRENCY` | `2` | Max in-flight LLM calls cluster-wide |
 | `LLM_BASE_URL`, `LLM_FALLBACK_PROVIDER` | – | For ollama/openai_compat; fallback when the daily quota runs out |
-| `ANTHROPIC_API_KEY`, `LLM_EFFORT` | – / `medium` | Claude (`LLM_PROVIDER=anthropic`): API key and effort level |
 | `VISION_VERIFY` / `VISION_BATCH_SIZE` | `true` / `8` | Ground frame captions with one batched vision call per job |
 | `NOTION_OAUTH_CLIENT_ID` / `NOTION_OAUTH_CLIENT_SECRET` / `NOTION_OAUTH_REDIRECT_URI` | – | **Notion OAuth client credentials** |
 | `NOTION_DEFAULT_PARENT_ID` | – | Optional default destination (§2.4) |

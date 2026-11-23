@@ -25,7 +25,6 @@ worker = [
     "pillow>=10.0",
     "faster-whisper>=1.1",  # local speech-to-text fallback when YouTube captions are blocked
     "av>=15,<19",           # PyAV 19 dropped an argument faster-whisper 1.2 still passes
-    "anthropic>=2.12,<3",   # LLM_PROVIDER=anthropic (Claude)
 ]
 dev = [
     "notetaker[worker]",
